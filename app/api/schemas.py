@@ -88,6 +88,9 @@ class ToolCallResponse(BaseModel):
     )
     correlation_id: str
 
+# Type alias для ответа эндпоинта /api/ask
+AskResponse = TextResponse | ToolCallResponse
+
 
 # ============================================
 # Ошибка
