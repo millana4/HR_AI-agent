@@ -1,0 +1,244 @@
+openapi: 3.0.3
+
+info:
+  title: HR AI Agent API
+  description: |
+    HTTP API для общения Telegram-бота с ИИ-агентом.
+
+    Агент принимает текстовый запрос и возвращает либо готовый текстовый ответ,
+    либо инструкцию боту выполнить определённое действие (tool_call).
+  version: 1.0.0
+  contact:
+    name: Иван Иванов
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /api/ask:
+    post:
+      summary: Задать вопрос ИИ-агенту
+      description: |
+        Принимает вопрос пользователя, возвращает либо текстовый ответ,
+        либо список tool_call для выполнения ботом.
+
+        Session_id агент формирует сам на основе user_id + текущая дата.
+      operationId: ask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AskRequest"
+      responses:
+        "200":
+          description: Успешный ответ агента
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AskResponse"
+        "400":
+          description: Невалидный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Неверный или отсутствующий API-ключ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Превышен лимит запросов
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Внутренняя ошибка агента
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Внешняя LLM не ответила в отведённое время
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/health:
+    get:
+      summary: Проверка работоспособности сервиса
+      description: Используется для healthcheck в Docker и для мониторинга.
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: Сервис работает
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Общий секрет между ботом и агентом
+
+  schemas:
+    AskRequest:
+      type: object
+      required:
+        - user_id
+        - request
+      properties:
+        user_id:
+          type: integer
+          format: int64
+          description: ID пользователя. Используется для session_id и user_hash.
+          example: 123456789
+        request:
+          type: string
+          description: Текст вопроса пользователя.
+          minLength: 1
+          maxLength: 2000
+          example: "Где найти бланк заявления на отпуск?"
+        correlation_id:
+          type: string
+          description: |
+            Идентификатор для трассировки запроса в логах.
+            Если не передан — агент сгенерирует сам.
+          example: "a3f8b9c2d1e4f567"
+
+    AskResponse:
+      type: object
+      required:
+        - response_type
+        - correlation_id
+      discriminator:
+        propertyName: response_type
+        mapping:
+          text: "#/components/schemas/TextResponse"
+          tool_call: "#/components/schemas/ToolCallResponse"
+      oneOf:
+        - $ref: "#/components/schemas/TextResponse"
+        - $ref: "#/components/schemas/ToolCallResponse"
+
+    TextResponse:
+      type: object
+      required:
+        - response_type
+        - answer
+        - tool_used
+        - correlation_id
+      properties:
+        response_type:
+          type: string
+          enum: [text]
+          description: Тип ответа — готовый текст для пользователя.
+        answer:
+          type: string
+          description: Финальный текст ответа от агента.
+          example: "Стандартный отпуск 28 календарных дней. Подробнее в велкомбуке: ..."
+        tool_used:
+          type: string
+          enum:
+            - search_faq
+            - search_documents
+            - search_knowledge_base
+            - answer_general
+          description: Какой внутренний tool агента сформировал ответ. Для аналитики.
+        correlation_id:
+          type: string
+          example: "a3f8b9c2d1e4f567"
+
+    ToolCallResponse:
+      type: object
+      required:
+        - response_type
+        - tool_calls
+        - correlation_id
+      properties:
+        response_type:
+          type: string
+          enum: [tool_call]
+          description: Тип ответа — инструкция боту выполнить действия.
+        tool_calls:
+          type: array
+          minItems: 1
+          description: |
+            Список действий для выполнения ботом. Сейчас обычно один элемент,
+            но структура заложена под возможные множественные вызовы.
+          items:
+            $ref: "#/components/schemas/ToolCall"
+        correlation_id:
+          type: string
+          example: "a3f8b9c2d1e4f567"
+
+    ToolCall:
+      type: object
+      required:
+        - name
+        - args
+      properties:
+        name:
+          type: string
+          enum:
+            - search_contacts
+            - search_ats_mavis
+            - search_ats_votonia
+            - search_shop
+            - search_drugstore
+            - suggest_hr_form
+          description: Имя команды, которую должен выполнить бот.
+        args:
+          type: object
+          additionalProperties: true
+          description: |
+            Аргументы для команды. Структура зависит от name.
+
+            search_contacts → {"first_name": str, "last_name": str} (любое из полей может быть пустым)
+            search_ats_mavis → {"department": str}
+            search_ats_votonia → {"department": str}
+            search_shop → {"address": str}
+            search_drugstore → {"address": str}
+            suggest_hr_form → {} (пустой объект)
+          example:
+            first_name: "Иван"
+            last_name: "Иванов"
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [ok]
+          example: "ok"
+        version:
+          type: string
+          example: "1.0.0"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - correlation_id
+      properties:
+        error:
+          type: string
+          description: Короткое описание ошибки.
+          example: "LLM timeout"
+        detail:
+          type: string
+          description: Развёрнутое описание ошибки. Может отсутствовать.
+          example: "External LLM did not respond within 60 seconds"
+        correlation_id:
+          type: string
+          example: "a3f8b9c2d1e4f567"
