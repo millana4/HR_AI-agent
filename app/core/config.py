@@ -29,13 +29,16 @@ class Config:
     AI_ANALYTICS_TABLE_ID = os.getenv("AI_ANALYTICS_TABLE_ID")
 
     # LLM
-    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "minimax")
-    LLM_API_KEY = os.getenv("LLM_API_KEY")
-    LLM_API_URL = os.getenv("LLM_API_URL")
-    LLM_MODEL = os.getenv("LLM_MODEL")
+    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gigachat")
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", 0.3))
     LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", 1024))
     LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", 60))
+
+    # GigaChat
+    GIGACHAT_AUTH_KEY = os.getenv("GIGACHAT_AUTH_KEY")
+    GIGACHAT_AUTH_URL = os.getenv("GIGACHAT_AUTH_URL")
+    GIGACHAT_API_URL = os.getenv("GIGACHAT_API_URL")
+    GIGACHAT_SCOPE = os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_PERS")
 
     # Redis
     REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
