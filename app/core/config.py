@@ -27,6 +27,7 @@ class Config:
     AI_FAQ_TABLE_ID = os.getenv("AI_FAQ_TABLE_ID")
     AI_DOCUMENTS_TABLE_ID = os.getenv("AI_DOCUMENTS_TABLE_ID")
     AI_ANALYTICS_TABLE_ID = os.getenv("AI_ANALYTICS_TABLE_ID")
+    PIVOT_TABLE_ID = os.getenv("PIVOT_TABLE_ID")
 
     # LLM
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gigachat")
