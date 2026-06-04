@@ -150,7 +150,7 @@ components:
           enum:
             - search_faq
             - search_documents
-            - search_knowledge_base
+            - search_wiki
             - answer_general
           description: Какой внутренний tool агента сформировал ответ. Для аналитики.
         correlation_id:

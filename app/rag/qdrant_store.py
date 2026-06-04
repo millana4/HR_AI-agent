@@ -40,6 +40,7 @@ class QdrantChunk:
     title: str
     text: str
     chunk_index: int = 0
+    indexed_at: str | None = None  # ISO-строка времени индексации
 
 
 @dataclass
@@ -154,6 +155,7 @@ class QdrantStore:
                     "title": chunk.title,
                     "text": chunk.text,
                     "chunk_index": chunk.chunk_index,
+                    "indexed_at": chunk.indexed_at,
                 },
             )
             for chunk in chunks
@@ -258,6 +260,44 @@ class QdrantStore:
             f"Deleted chunks for source: {source_url}",
             extra={"correlation_id": correlation_id},
         )
+
+    async def get_indexed_at(
+            self,
+            source_url: str,
+            correlation_id: str = "-",
+    ) -> str | None:
+        """
+        Получить дату последней индексации источника.
+
+        Возвращает значение payload.indexed_at у любого чанка с указанным source_url,
+        или None если такого источника в коллекции ещё нет.
+
+        Дата хранится в ISO-строке.
+        """
+        client = self._get_client()
+        try:
+            response = await client.scroll(
+                collection_name=self._collection,
+                scroll_filter=qm.Filter(
+                    must=[
+                        qm.FieldCondition(
+                            key="source_url",
+                            match=qm.MatchValue(value=source_url),
+                        )
+                    ]
+                ),
+                limit=1,
+                with_payload=True,
+                with_vectors=False,
+            )
+        except Exception as exc:
+            raise RepositoryError(f"Qdrant scroll failed: {exc}") from exc
+
+        points, _next_offset = response
+        if not points:
+            return None
+
+        return points[0].payload.get("indexed_at")
 
 
 def _make_point_id(source_url: str, chunk_index: int) -> str:

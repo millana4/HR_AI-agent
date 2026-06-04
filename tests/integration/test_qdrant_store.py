@@ -243,3 +243,27 @@ async def test_blank_source_type(store: QdrantStore):
 async def test_upsert_empty_list_noop(store: QdrantStore):
     """Пустой список не падает."""
     await store.upsert([])
+
+
+async def test_get_indexed_at_returns_value(store: QdrantStore):
+    """get_indexed_at возвращает значение из payload."""
+    await store.upsert([
+        QdrantChunk(
+            vector=_make_fake_vector(1),
+            source_type="support",
+            source_url="https://cdn.example.com/doc.pdf",
+            title="Doc",
+            text="text",
+            chunk_index=0,
+            indexed_at="2026-06-04T10:00:00",
+        ),
+    ])
+
+    result = await store.get_indexed_at("https://cdn.example.com/doc.pdf")
+    assert result == "2026-06-04T10:00:00"
+
+
+async def test_get_indexed_at_returns_none_for_unknown_source(store: QdrantStore):
+    """Если источника нет в Qdrant — возвращается None."""
+    result = await store.get_indexed_at("https://cdn.example.com/never-indexed.pdf")
+    assert result is None

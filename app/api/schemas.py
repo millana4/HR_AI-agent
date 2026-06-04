@@ -62,7 +62,7 @@ class ToolCall(BaseModel):
 AgentToolName = Literal[
     "search_faq",
     "search_documents",
-    "search_knowledge_base",
+    "search_wiki",
     "answer_general",
 ]
 
