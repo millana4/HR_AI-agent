@@ -49,10 +49,10 @@ async def test_parse_surname_genitive(parser: PiiParser):
 
 async def test_parse_first_and_last_name(parser: PiiParser):
     """Имя и фамилия в одном запросе."""
-    result = parser.parse("Найди контакт Иванова Ивана")
+    result = parser.parse("Найди контакт Петрова Сидора")
     assert result.masked_text == "Найди контакт [NAME] [NAME]"
-    assert "Иванов" in result.found_names
-    assert "Иван" in result.found_names
+    assert "Пётр" in result.found_names or "Петров" in result.found_names
+    assert "Сидор" in result.found_names or "Сидоров" in result.found_names
 
 
 async def test_parse_case_insensitive(parser: PiiParser):

@@ -12,3 +12,20 @@
 ## Стек
 
 Python 3.12, FastAPI, Qdrant, Redis, Natasha, sentence-transformers.
+
+## Redis
+docker start hr-ai-redis
+
+docker ps | grep hr-ai-redis
+
+Проверка:
+
+docker exec hr-ai-redis redis-cli ping
+
+## Qdrant
+docker start hr-ai-qdrant
+
+curl http://localhost:6333/collections
+
+Проверка:
+docker ps | grep hr-ai-qdrant
