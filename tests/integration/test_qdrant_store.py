@@ -57,7 +57,7 @@ async def test_upsert_and_search(store: QdrantStore):
         QdrantChunk(
             vector=_make_fake_vector(1),
             source_type="support",
-            source_url="https://cdn.example.com/welcomebook.pdf",
+            source_id="https://cdn.example.com/welcomebook.pdf",
             title="Велкомбук",
             text="Текст про отпуск",
             chunk_index=0,
@@ -65,7 +65,7 @@ async def test_upsert_and_search(store: QdrantStore):
         QdrantChunk(
             vector=_make_fake_vector(2),
             source_type="wiki_page",
-            source_url="https://std.kitdev.ru/page1",
+            source_id="https://std.kitdev.ru/page1",
             title="Wiki страница",
             text="Текст про регламент",
             chunk_index=0,
@@ -73,7 +73,7 @@ async def test_upsert_and_search(store: QdrantStore):
         QdrantChunk(
             vector=_make_fake_vector(3),
             source_type="faq",
-            source_url="faq://question/1",
+            source_id="faq://question/1",
             title="Вопрос про обед",
             text="Где находится столовая?",
             chunk_index=0,
@@ -92,7 +92,7 @@ async def test_search_with_source_type_filter(store: QdrantStore):
         QdrantChunk(
             vector=_make_fake_vector(1),
             source_type="support",
-            source_url="https://cdn.example.com/doc",
+            source_id="https://cdn.example.com/doc",
             title="Doc",
             text="doc text",
             chunk_index=0,
@@ -100,7 +100,7 @@ async def test_search_with_source_type_filter(store: QdrantStore):
         QdrantChunk(
             vector=_make_fake_vector(2),
             source_type="wiki_page",
-            source_url="https://std.kitdev.ru/page",
+            source_id="https://std.kitdev.ru/page",
             title="Wiki",
             text="wiki text",
             chunk_index=0,
@@ -122,7 +122,7 @@ async def test_search_with_multiple_source_types(store: QdrantStore):
         QdrantChunk(
             vector=_make_fake_vector(1),
             source_type="support",
-            source_url="https://cdn.example.com/welcome.pdf",
+            source_id="https://cdn.example.com/welcome.pdf",
             title="Велкомбук",
             text="документ",
             chunk_index=0,
@@ -130,7 +130,7 @@ async def test_search_with_multiple_source_types(store: QdrantStore):
         QdrantChunk(
             vector=_make_fake_vector(2),
             source_type="faq",
-            source_url="faq://1",
+            source_id="faq://1",
             title="FAQ",
             text="faq",
             chunk_index=0,
@@ -138,7 +138,7 @@ async def test_search_with_multiple_source_types(store: QdrantStore):
         QdrantChunk(
             vector=_make_fake_vector(3),
             source_type="wiki_page",
-            source_url="https://std.kitdev.ru/page",
+            source_id="https://std.kitdev.ru/page",
             title="Wiki",
             text="wiki",
             chunk_index=0,
@@ -156,11 +156,11 @@ async def test_search_with_multiple_source_types(store: QdrantStore):
 
 
 async def test_upsert_same_id_overwrites(store: QdrantStore):
-    """Повторный upsert того же (source_url, chunk_index) обновляет, а не дублирует."""
+    """Повторный upsert того же (source_id, chunk_index) обновляет, а не дублирует."""
     chunk_v1 = QdrantChunk(
         vector=_make_fake_vector(1),
         source_type="regulation",
-        source_url="https://cdn.example.com/same",
+        source_id="https://cdn.example.com/same",
         title="V1",
         text="version 1",
         chunk_index=0,
@@ -168,7 +168,7 @@ async def test_upsert_same_id_overwrites(store: QdrantStore):
     chunk_v2 = QdrantChunk(
         vector=_make_fake_vector(1),
         source_type="regulation",
-        source_url="https://cdn.example.com/same",
+        source_id="https://cdn.example.com/same",
         title="V2",
         text="version 2",
         chunk_index=0,
@@ -182,12 +182,12 @@ async def test_upsert_same_id_overwrites(store: QdrantStore):
 
 
 async def test_delete_by_source(store: QdrantStore):
-    """Удаление по source_url убирает все чанки этого документа."""
+    """Удаление по source_id убирает все чанки этого документа."""
     await store.upsert([
         QdrantChunk(
             vector=_make_fake_vector(1),
             source_type="support",
-            source_url="https://cdn.example.com/to-delete",
+            source_id="https://cdn.example.com/to-delete",
             title="To delete",
             text="part 1",
             chunk_index=0,
@@ -195,7 +195,7 @@ async def test_delete_by_source(store: QdrantStore):
         QdrantChunk(
             vector=_make_fake_vector(2),
             source_type="support",
-            source_url="https://cdn.example.com/to-delete",
+            source_id="https://cdn.example.com/to-delete",
             title="To delete",
             text="part 2",
             chunk_index=1,
@@ -203,7 +203,7 @@ async def test_delete_by_source(store: QdrantStore):
         QdrantChunk(
             vector=_make_fake_vector(3),
             source_type="support",
-            source_url="https://cdn.example.com/to-keep",
+            source_id="https://cdn.example.com/to-keep",
             title="To keep",
             text="keep me",
             chunk_index=0,
@@ -214,7 +214,7 @@ async def test_delete_by_source(store: QdrantStore):
 
     results = await store.search(_make_fake_vector(1), top_k=10)
     assert len(results) == 1
-    assert results[0].source_url == "https://cdn.example.com/to-keep"
+    assert results[0].source_id == "https://cdn.example.com/to-keep"
 
 
 async def test_blank_source_type(store: QdrantStore):
@@ -223,7 +223,7 @@ async def test_blank_source_type(store: QdrantStore):
         QdrantChunk(
             vector=_make_fake_vector(1),
             source_type="blank",
-            source_url="https://cdn.example.com/vacation_blank.docx",
+            source_id="https://cdn.example.com/vacation_blank.docx",
             title="Заявление на оплачиваемый отпуск",
             text="Заявление на оплачиваемый отпуск. Шаблон для подачи в отдел кадров.",
             chunk_index=0,
@@ -251,7 +251,7 @@ async def test_get_indexed_at_returns_value(store: QdrantStore):
         QdrantChunk(
             vector=_make_fake_vector(1),
             source_type="support",
-            source_url="https://cdn.example.com/doc.pdf",
+            source_id="https://cdn.example.com/doc.pdf",
             title="Doc",
             text="text",
             chunk_index=0,

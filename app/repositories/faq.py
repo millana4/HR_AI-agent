@@ -6,6 +6,7 @@
 остальные поля сохраняем в payload Qdrant для использования tool'ом.
 """
 from dataclasses import dataclass
+from datetime import datetime
 
 from app.core.config import Config
 from app.core.logging import get_logger
@@ -24,7 +25,18 @@ class FaqEntry:
     answer: str
     link: str | None
     attachment: str | None
-    hidden_data: str | None  # формат "КЛЮЧ=значение", может содержать несколько строк
+    hidden_data: str | None
+    updated_at: datetime | None
+
+
+def _parse_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        logger.warning(f"Failed to parse datetime: {value!r}")
+        return None
 
 
 async def fetch_faq(
@@ -64,6 +76,7 @@ async def fetch_faq(
                 link=(rec.get("Link") or None) or None,
                 attachment=(rec.get("Attachment") or None) or None,
                 hidden_data=(rec.get("Hidden_data") or None) or None,
+                updated_at=_parse_datetime(rec.get("UpdatedAt")),
             )
         )
 

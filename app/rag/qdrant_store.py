@@ -2,8 +2,13 @@
 Обёртка над Qdrant — векторной базой данных.
 
 Хранит чанки текста с эмбеддингами и метаданными.
-Метаданные содержат source_type, source_url, title и сам текст чанка
+Метаданные содержат source_type, source_id, title и сам текст чанка
 (чтобы при поиске сразу получать контекст без обращения к источнику).
+
+source_id — универсальный идентификатор источника:
+- для документов из CDN это URL файла,
+- для FAQ из NocoDB — строка "nocodb_id:<Id>",
+- для страниц wiki — URL страницы.
 """
 import uuid
 from dataclasses import dataclass
@@ -22,11 +27,11 @@ logger = get_logger(__name__)
 
 
 SourceType = Literal[
-    "blank",        # бланки документов (только метаданные, не содержимое)
-    "regulation",   # нормативные документы из CDN
-    "support",      # справочные документы из CDN (велкомбук, гайды)
-    "wiki_page",    # страницы внешней базы знаний
-    "faq",          # пары вопрос-ответ из таблицы AI_FAQ
+    "blank",
+    "regulation",
+    "support",
+    "wiki",
+    "faq",
 ]
 
 
@@ -36,7 +41,7 @@ class QdrantChunk:
 
     vector: list[float]
     source_type: SourceType
-    source_url: str
+    source_id: str
     title: str
     text: str
     chunk_index: int = 0
@@ -48,7 +53,7 @@ class SearchResult:
     """Результат поиска в Qdrant — чанк + score."""
 
     source_type: str
-    source_url: str
+    source_id: str
     title: str
     text: str
     chunk_index: int
@@ -58,14 +63,6 @@ class SearchResult:
 class QdrantStore:
     """
     Обёртка над AsyncQdrantClient.
-
-    Использование:
-        store = QdrantStore()
-        await store.connect()
-        await store.ensure_collection()
-        await store.upsert([chunk1, chunk2])
-        results = await store.search(query_vector, top_k=5)
-        await store.disconnect()
     """
 
     def __init__(self) -> None:
@@ -138,8 +135,7 @@ class QdrantStore:
         """
         Записать чанки в коллекцию.
 
-        Если чанк с такими же source_url + chunk_index уже есть — перезаписывает.
-        Это позволяет безопасно переиндексировать один и тот же документ.
+        Если чанк с такими же source_id + chunk_index уже есть — перезаписывает.
         """
         if not chunks:
             return
@@ -147,11 +143,11 @@ class QdrantStore:
         client = self._get_client()
         points = [
             qm.PointStruct(
-                id=_make_point_id(chunk.source_url, chunk.chunk_index),
+                id=_make_point_id(chunk.source_id, chunk.chunk_index),
                 vector=chunk.vector,
                 payload={
                     "source_type": chunk.source_type,
-                    "source_url": chunk.source_url,
+                    "source_id": chunk.source_id,
                     "title": chunk.title,
                     "text": chunk.text,
                     "chunk_index": chunk.chunk_index,
@@ -178,18 +174,7 @@ class QdrantStore:
         source_types: list[SourceType] | None = None,
         correlation_id: str = "-",
     ) -> list[SearchResult]:
-        """
-        Найти top_k ближайших чанков.
-
-        Args:
-            query_vector: эмбеддинг запроса
-            top_k: количество результатов
-            source_types: фильтр по типу источника (например, только ['regulation', 'support'])
-            correlation_id: для логов
-
-        Returns:
-            Список SearchResult, отсортированных по убыванию score.
-        """
+        """Найти top_k ближайших чанков."""
         client = self._get_client()
 
         query_filter = None
@@ -217,7 +202,7 @@ class QdrantStore:
         results = [
             SearchResult(
                 source_type=point.payload.get("source_type", ""),
-                source_url=point.payload.get("source_url", ""),
+                source_id=point.payload.get("source_id", ""),
                 title=point.payload.get("title", ""),
                 text=point.payload.get("text", ""),
                 chunk_index=point.payload.get("chunk_index", 0),
@@ -234,10 +219,10 @@ class QdrantStore:
 
     async def delete_by_source(
         self,
-        source_url: str,
+        source_id: str,
         correlation_id: str = "-",
     ) -> None:
-        """Удалить все чанки одного источника. Используется при переиндексации."""
+        """Удалить все чанки одного источника."""
         client = self._get_client()
         try:
             await client.delete(
@@ -246,8 +231,8 @@ class QdrantStore:
                     filter=qm.Filter(
                         must=[
                             qm.FieldCondition(
-                                key="source_url",
-                                match=qm.MatchValue(value=source_url),
+                                key="source_id",
+                                match=qm.MatchValue(value=source_id),
                             )
                         ]
                     )
@@ -257,22 +242,20 @@ class QdrantStore:
             raise RepositoryError(f"Qdrant delete failed: {exc}") from exc
 
         logger.info(
-            f"Deleted chunks for source: {source_url}",
+            f"Deleted chunks for source: {source_id}",
             extra={"correlation_id": correlation_id},
         )
 
     async def get_indexed_at(
-            self,
-            source_url: str,
-            correlation_id: str = "-",
+        self,
+        source_id: str,
+        correlation_id: str = "-",
     ) -> str | None:
         """
         Получить дату последней индексации источника.
 
-        Возвращает значение payload.indexed_at у любого чанка с указанным source_url,
+        Возвращает значение payload.indexed_at у любого чанка с указанным source_id,
         или None если такого источника в коллекции ещё нет.
-
-        Дата хранится в ISO-строке.
         """
         client = self._get_client()
         try:
@@ -281,8 +264,8 @@ class QdrantStore:
                 scroll_filter=qm.Filter(
                     must=[
                         qm.FieldCondition(
-                            key="source_url",
-                            match=qm.MatchValue(value=source_url),
+                            key="source_id",
+                            match=qm.MatchValue(value=source_id),
                         )
                     ]
                 ),
@@ -300,12 +283,11 @@ class QdrantStore:
         return points[0].payload.get("indexed_at")
 
 
-def _make_point_id(source_url: str, chunk_index: int) -> str:
+def _make_point_id(source_id: str, chunk_index: int) -> str:
     """
     Сгенерировать стабильный UUID для точки Qdrant.
 
-    Один и тот же (source_url, chunk_index) → один и тот же UUID.
-    Это позволяет переиндексировать тот же документ без дублирования.
+    Один и тот же (source_id, chunk_index) → один и тот же UUID.
     """
-    raw = f"{source_url}::chunk::{chunk_index}"
+    raw = f"{source_id}::chunk::{chunk_index}"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, raw))

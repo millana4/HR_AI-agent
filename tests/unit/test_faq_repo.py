@@ -16,12 +16,12 @@ async def test_fetch_faq_filters_inactive(mock_client):
         {
             "Id": 1, "Question": "Q1", "Answer": "A1",
             "Link": None, "Attachment": None, "Hidden_data": None,
-            "Active": True,
+            "Active": True, "UpdatedAt": "2026-06-02 09:39:41+00:00",
         },
         {
             "Id": 2, "Question": "Q2", "Answer": "A2",
             "Link": None, "Attachment": None, "Hidden_data": None,
-            "Active": False,
+            "Active": False, "UpdatedAt": "2026-06-02 09:39:41+00:00",
         },
     ]
     entries = await fetch_faq(mock_client)
@@ -34,12 +34,12 @@ async def test_fetch_faq_skips_empty_questions(mock_client):
         {
             "Id": 1, "Question": "", "Answer": "A",
             "Link": None, "Attachment": None, "Hidden_data": None,
-            "Active": True,
+            "Active": True, "UpdatedAt": None,
         },
         {
             "Id": 2, "Question": "Q", "Answer": "",
             "Link": None, "Attachment": None, "Hidden_data": None,
-            "Active": True,
+            "Active": True, "UpdatedAt": None,
         },
     ]
     entries = await fetch_faq(mock_client)
@@ -56,6 +56,7 @@ async def test_fetch_faq_parses_all_fields(mock_client):
             "Attachment": "https://cdn.example.com/x.pdf",
             "Hidden_data": "АД_ДИР=Иван Иванов",
             "Active": True,
+            "UpdatedAt": "2026-06-02 09:39:41+00:00",
         },
     ]
     entries = await fetch_faq(mock_client)
@@ -66,6 +67,8 @@ async def test_fetch_faq_parses_all_fields(mock_client):
     assert e.link == "https://example.com"
     assert e.attachment == "https://cdn.example.com/x.pdf"
     assert e.hidden_data == "АД_ДИР=Иван Иванов"
+    assert e.updated_at is not None
+    assert e.updated_at.year == 2026
 
 
 async def test_fetch_faq_handles_null_optional_fields(mock_client):
@@ -73,10 +76,11 @@ async def test_fetch_faq_handles_null_optional_fields(mock_client):
         {
             "Id": 1, "Question": "Q", "Answer": "A",
             "Link": None, "Attachment": None, "Hidden_data": None,
-            "Active": True,
+            "Active": True, "UpdatedAt": None,
         },
     ]
     entries = await fetch_faq(mock_client)
     assert entries[0].link is None
     assert entries[0].attachment is None
     assert entries[0].hidden_data is None
+    assert entries[0].updated_at is None
