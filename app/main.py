@@ -30,6 +30,11 @@ from app.core.exceptions import (
     ToolExecutionError,
 )
 from app.core.logging import get_logger, setup_logging
+from app.llm.factory import get_llm_client
+from app.repositories.nocodb_client import NocoDBClient
+from app.services.agent_loop import AgentLoop
+from app.services.pii_parser import PiiParser
+from app.services.session_store import SessionStore
 
 
 setup_logging()
@@ -38,10 +43,61 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Действия при старте и остановке приложения."""
+    """
+    Старт: создаём долгоживущие клиенты и собираем AgentLoop в app.state.
+    Остановка: корректно закрываем сессии (Redis, httpx).
+    """
+    logger.info("AI Agent service starting...")
+
+    # 1. NocoDB-клиент — нужен PiiParser для загрузки кэша имён.
+    nocodb_client = NocoDBClient()
+
+    # 2. SessionStore — Redis для истории сессий.
+    session_store = SessionStore()
+    await session_store.connect()
+
+    # 3. LLM-клиент по конфигу (сейчас — GigaChat).
+    llm_client = get_llm_client()
+
+    # 4. PiiParser — заранее прогреваем кэш PII-имён из NocoDB.
+    pii_parser = PiiParser()
+    await pii_parser.ensure_ready(nocodb_client, correlation_id="startup")
+
+    # 5. Собираем AgentLoop и кладём в app.state.
+    app.state.agent_loop = AgentLoop(
+        llm=llm_client,
+        session_store=session_store,
+        pii_parser=pii_parser,
+        nocodb_client=nocodb_client,
+    )
+
     logger.info("AI Agent service started")
-    yield
-    logger.info("AI Agent service stopped")
+
+    try:
+        yield
+    finally:
+        logger.info("AI Agent service stopping...")
+
+        # Закрываем ресурсы в обратном порядке.
+        try:
+            await llm_client.close()
+        except Exception as exc:
+            logger.warning(f"Error closing LLM client: {exc}")
+
+        try:
+            await session_store.disconnect()
+        except Exception as exc:
+            logger.warning(f"Error disconnecting Redis: {exc}")
+
+        try:
+            await nocodb_client.close()
+        except AttributeError:
+            # У клиента нет метода close — игнорируем.
+            pass
+        except Exception as exc:
+            logger.warning(f"Error closing NocoDB client: {exc}")
+
+        logger.info("AI Agent service stopped")
 
 
 app = FastAPI(
