@@ -1,0 +1,82 @@
+name: hr-ai-agent
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    container_name: hr-ai-qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - agent-net
+    ports:
+      - "6333:6333"
+
+  redis:
+    image: redis:7-alpine
+    container_name: hr-ai-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - agent-net
+    ports:
+      - "6379:6379"
+
+  agent:
+    build:
+      context: ..
+      dockerfile: devops/Dockerfile
+    container_name: hr-ai-agent
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: redis
+      QDRANT_HOST: qdrant
+    volumes:
+      - ../logs:/app/logs
+      - hf_cache:/home/appuser/.cache/huggingface
+    ports:
+      - "8000:8000"
+    depends_on:
+      - qdrant
+      - redis
+    networks:
+      - agent-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+  indexer:
+    build:
+      context: ..
+      dockerfile: devops/Dockerfile
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: redis
+      QDRANT_HOST: qdrant
+    volumes:
+      - ../logs:/app/logs
+      - hf_cache:/home/appuser/.cache/huggingface
+    depends_on:
+      - qdrant
+    networks:
+      - agent-net
+    profiles:
+      - tools
+    entrypoint: ["python", "scripts/run_indexers.py"]
+
+volumes:
+  qdrant_data:
+  redis_data:
+  hf_cache:
+
+networks:
+  agent-net:
+    driver: bridge

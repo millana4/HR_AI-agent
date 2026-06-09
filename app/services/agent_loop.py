@@ -3,11 +3,11 @@
 
 Pass 1: LLM получает запрос + историю + спецификации tools. Решает:
   (a) ответить сама → answer_general
-  (b) вызвать agent_internal tool → переход к Pass 2
+  (b) вызвать search_internal → переход к Pass 2 (поиск во внутренних источниках)
   (c) вызвать bot_command tool → возврат боту команды
 
-Pass 2: выполняем agent_internal tool, отдаём контекст в LLM, получаем
-финальный текстовый ответ.
+Pass 2: выполняем search_internal, отдаём контекст в LLM, получаем
+финальный текстовый ответ. Если поиск пуст — возвращаем боту suggest_hr_form.
 
 PII-политика:
   - В Redis всегда сохраняем МАСКИРОВАННЫЕ версии (с [NAME]).
@@ -26,7 +26,7 @@ from app.repositories.nocodb_client import NocoDBClient
 from app.services.pii_parser import PiiParser
 from app.services.session_store import SessionStore
 from app.tools.registry import get_all_tool_specs, is_agent_internal, is_bot_command
-from app.tools.tools_internal import execute_internal_tool
+from app.tools.tools_internal import NO_CONTEXT, execute_internal_tool
 
 
 logger = get_logger(__name__)
@@ -168,7 +168,7 @@ async def process_request(
             correlation_id=correlation_id,
         )
 
-    # 8. agent_internal — выполняем tool, получаем контекст.
+    # 8. agent_internal (search_internal) — выполняем поиск, получаем контекст.
     context = await execute_internal_tool(
         tool_name=tool_name,
         args=tool_args,
@@ -177,12 +177,32 @@ async def process_request(
         correlation_id=correlation_id,
     )
 
+    # 8a. Поиск ничего не нашёл — предлагаем форму HR (bot_command).
+    #     В Redis сохраняем только запрос пользователя.
+    if context == NO_CONTEXT:
+        logger.info(
+            "search_internal вернул пусто — предлагаем форму HR",
+            extra={"correlation_id": correlation_id},
+        )
+        await agent.session_store.append(
+            user_id=user_id,
+            role="user",
+            content=masked_query,
+            correlation_id=correlation_id,
+        )
+        return ToolCallResponse(
+            tool_calls=[ToolCall(name="suggest_hr_form", args={})],
+            correlation_id=correlation_id,
+        )
+
     # 9. Pass 2 — LLM формирует финальный ответ из контекста.
+    #    GigaChat требует один system-промпт в начале, поэтому контекст
+    #    склеиваем с системным промптом, а не добавляем вторым system-сообщением.
+    pass2_system = SYSTEM_PROMPT + "\n\n" + make_context_prompt(tool_name, context)
     pass2_messages = [
-        Message(role="system", content=SYSTEM_PROMPT),
+        Message(role="system", content=pass2_system),
         *history_messages,
         Message(role="user", content=masked_query),
-        Message(role="system", content=make_context_prompt(tool_name, context)),
     ]
     pass2_response = await agent.llm.chat(
         messages=pass2_messages,

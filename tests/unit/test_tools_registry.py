@@ -1,3 +1,4 @@
+
 """Тесты реестра tools."""
 from app.tools.registry import (
     TOOLS,
@@ -9,9 +10,9 @@ from app.tools.registry import (
 
 
 def test_all_expected_tools_registered():
-    """В реестре должны быть все 9 ожидаемых tools."""
+    """В реестре должны быть все 7 ожидаемых tools."""
     expected = {
-        "search_faq", "search_documents", "search_wiki",
+        "search_internal",
         "search_contacts", "search_ats_mavis", "search_ats_votonia",
         "search_shop", "search_drugstore", "suggest_hr_form",
     }
@@ -19,10 +20,8 @@ def test_all_expected_tools_registered():
 
 
 def test_agent_internal_tools():
-    """search_faq, search_documents, search_wiki — внутренние."""
-    assert is_agent_internal("search_faq")
-    assert is_agent_internal("search_documents")
-    assert is_agent_internal("search_wiki")
+    """search_internal — единственный внутренний tool."""
+    assert is_agent_internal("search_internal")
 
 
 def test_bot_command_tools():
@@ -73,7 +72,6 @@ def test_each_spec_has_required_fields():
 def test_specs_have_russian_descriptions():
     """Описания на русском — критично для качества вызова в GigaChat."""
     for spec in get_all_tool_specs():
-        # Проверка что в описании есть хоть одна кириллическая буква
         assert any("а" <= ch.lower() <= "я" for ch in spec.description), (
             f"Tool {spec.name} description should be in Russian"
         )

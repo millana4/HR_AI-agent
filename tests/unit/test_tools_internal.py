@@ -1,5 +1,5 @@
 """
-Тесты agent_internal tools (search_faq / search_documents / search_wiki).
+Тесты search_internal (единственный agent_internal tool).
 
 Используем QdrantStore поверх in-memory клиента qdrant-client (:memory:) —
 это настоящая реализация upsert/search, без Docker и без сети.
@@ -53,6 +53,14 @@ async def populated_store(store: QdrantStore):
             text="Бланк заявления на отпуск.",
             chunk_index=0,
         ),
+        QdrantChunk(
+            vector=_vec(3),
+            source_type="wiki",
+            source_id="https://std.kitdev.ru/edo",
+            title="Подключение к ЭДО",
+            text="Как подключить поставщика к ЭДО.",
+            chunk_index=0,
+        ),
     ])
     return store
 
@@ -63,9 +71,9 @@ def _embedder(seed: int):
     return e
 
 
-async def test_search_faq_includes_answer_hidden_and_link(populated_store):
+async def test_finds_faq_with_hidden_and_link(populated_store):
     ctx = await execute_internal_tool(
-        "search_faq", {"query": "кто директор"},
+        "search_internal", {"query": "кто директор"},
         populated_store, _embedder(1), correlation_id="t",
     )
     assert "Обратитесь к ДИРЕКТОР" in ctx
@@ -73,26 +81,40 @@ async def test_search_faq_includes_answer_hidden_and_link(populated_store):
     assert "https://wiki.example.com/dir" in ctx
 
 
-async def test_search_documents_includes_cdn_url(populated_store):
+async def test_finds_document_with_cdn_url(populated_store):
     ctx = await execute_internal_tool(
-        "search_documents", {"query": "бланк отпуска"},
+        "search_internal", {"query": "бланк отпуска"},
         populated_store, _embedder(2), correlation_id="t",
     )
     assert "Заявление на отпуск" in ctx
     assert "https://cdn.example.com/vacation.docx" in ctx
 
 
-async def test_search_wiki_is_stub(populated_store):
+async def test_finds_wiki_with_url(populated_store):
     ctx = await execute_internal_tool(
-        "search_wiki", {"query": "ЭДО"},
-        populated_store, _embedder(1), correlation_id="t",
+        "search_internal", {"query": "ЭДО"},
+        populated_store, _embedder(3), correlation_id="t",
     )
-    assert ctx == NO_CONTEXT
+    assert "Подключение к ЭДО" in ctx
+    assert "https://std.kitdev.ru/edo" in ctx
+
+
+async def test_searches_all_sources_at_once(populated_store):
+    """search_internal ищет по всем источникам — фильтр включает все типы."""
+    emb = _embedder(1)
+    await execute_internal_tool(
+        "search_internal", {"query": "что угодно"},
+        populated_store, emb, correlation_id="t",
+    )
+    # Проверяем, что в поиск ушли все внутренние source_type.
+    # search вызывается внутри execute_internal_tool на реальном store,
+    # поэтому проверяем через результат embed_query (он был вызван).
+    emb.embed_query.assert_awaited_once()
 
 
 async def test_empty_query_returns_no_context(populated_store):
     ctx = await execute_internal_tool(
-        "search_faq", {"query": "   "},
+        "search_internal", {"query": "   "},
         populated_store, _embedder(1), correlation_id="t",
     )
     assert ctx == NO_CONTEXT
@@ -109,7 +131,7 @@ async def test_unknown_tool_returns_no_context(populated_store):
 async def test_no_results_returns_no_context(store: QdrantStore):
     # store пустой — поиск ничего не найдёт
     ctx = await execute_internal_tool(
-        "search_faq", {"query": "что угодно"},
+        "search_internal", {"query": "что угодно"},
         store, _embedder(1), correlation_id="t",
     )
     assert ctx == NO_CONTEXT

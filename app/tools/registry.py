@@ -4,14 +4,13 @@
 Здесь описаны все tools: их JSON-схемы для LLM и тип выполнения.
 
 Tools бывают двух типов:
-- agent_internal: агент выполняет инструмент сам (поиск в Qdrant и т.д.),
+- agent_internal: агент выполняет инструмент сам (поиск в Qdrant),
   затем формирует финальный текстовый ответ.
 - bot_command: агент НЕ выполняет, а возвращает команду боту в формате
   ToolCallResponse. Бот сам сходит за данными и сформирует ответ пользователю.
 
-answer_general — особый случай: это agent_internal "tool", означающий
-"ничего не искать, отвечать на знаниях LLM". Реализован прямо в agent_loop
-как ветка без tool_call.
+answer_general — особый случай: это НЕ tool в реестре, а ветка в agent_loop
+(LLM ответила текстом без вызова tool).
 """
 from dataclasses import dataclass
 from typing import Literal
@@ -34,53 +33,17 @@ class RegisteredTool:
 
 # ---------- Спецификации tools для LLM ----------
 
-_SEARCH_FAQ_SPEC = ToolSpec(
-    name="search_faq",
+_SEARCH_INTERNAL_SPEC = ToolSpec(
+    name="search_internal",
     description=(
-        "Поиск в базе вопросов и ответов HR. Используй когда вопрос пользователя "
-        "похож на типовой и может уже быть в FAQ: например, про график, отпуск, "
-        "корпоратив, мероприятия, простые процедуры."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Поисковый запрос на русском языке",
-            },
-        },
-        "required": ["query"],
-    },
-)
-
-_SEARCH_DOCUMENTS_SPEC = ToolSpec(
-    name="search_documents",
-    description=(
-        "Поиск во внутренних документах компании: регламентах, инструкциях, "
-        "велкомбуке, бланках для заполнения. Используй когда нужны точные "
-        "сведения из официальных документов или когда пользователь спрашивает "
-        "про бланк заявления."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Поисковый запрос на русском языке",
-            },
-        },
-        "required": ["query"],
-    },
-)
-
-_SEARCH_WIKI_SPEC = ToolSpec(
-    name="search_wiki",
-    description=(
-        "Поиск в базе знаний компании на внешнем сайте. Используй для "
-        "поиска статей и описаний бизнес-процессов. Темы: электронный документооборот ЭДО EDI со СБИС и Корус,"
-        "работа с маркируемыми товарами Честный знак, интеграции со сторонними сервисами и системами,"
-        "например, по оплате фискализации, по работе с маркетплейсами"
-        "инструкции для закупок по подключению поставщиков к ЭДО, инструкции, как заполнять в 1С карточки на товары."
+        "Поиск во ВСЕХ внутренних источниках компании сразу: база вопросов-ответов "
+        "(FAQ), официальные документы (регламенты, инструкции, велкомбук, бланки "
+        "заявлений) и база знаний по бизнес-процессам (ЭДО СБИС и Корус, Честный "
+        "знак, маркетплейсы, карточки товаров в 1С, подключение поставщиков). "
+        "Используй для ЛЮБОГО вопроса о работе в компании: график, отпуск, "
+        "больничный, корпоратив, мероприятия, процедуры, бланки, регламенты, "
+        "IT-процессы. Ответ может быть в любом из источников — не выбирай источник "
+        "сам, этот инструмент ищет везде."
     ),
     parameters={
         "type": "object",
@@ -105,7 +68,7 @@ _SEARCH_CONTACTS_SPEC = ToolSpec(
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Имя и\или фамилия",
+                "description": "Имя и/или фамилия",
             },
         },
         "required": ["query"],
@@ -185,8 +148,8 @@ _SUGGEST_HR_FORM_SPEC = ToolSpec(
     description=(
         "Предложить пользователю заполнить форму обращения в HR-отдел. "
         "Использовать когда у пользователя сложный вопрос, на который не может "
-        "ответить ни одно из других средств, и этот вопрос касается внутренней работы компании"
-        "и нужна помощь живого HR."
+        "ответить ни одно из других средств, и этот вопрос касается внутренней "
+        "работы компании и нужна помощь живого HR."
     ),
     parameters={
         "type": "object",
@@ -198,12 +161,11 @@ _SUGGEST_HR_FORM_SPEC = ToolSpec(
 # ---------- Реестр ----------
 
 TOOLS: dict[str, RegisteredTool] = {
-    # Agent-internal: агент сам ищет, потом формирует ответ из контекста
-    "search_faq": RegisteredTool("search_faq", "agent_internal", _SEARCH_FAQ_SPEC),
-    "search_documents": RegisteredTool("search_documents", "agent_internal", _SEARCH_DOCUMENTS_SPEC),
-    "search_wiki": RegisteredTool("search_wiki", "agent_internal", _SEARCH_WIKI_SPEC),
+    # Agent-internal: агент сам ищет во всех внутренних источниках,
+    # потом формирует ответ из контекста.
+    "search_internal": RegisteredTool("search_internal", "agent_internal", _SEARCH_INTERNAL_SPEC),
 
-    # Bot-command: возвращаем боту, он сам выполнит
+    # Bot-command: возвращаем боту, он сам выполнит.
     "search_contacts": RegisteredTool("search_contacts", "bot_command", _SEARCH_CONTACTS_SPEC),
     "search_ats_mavis": RegisteredTool("search_ats_mavis", "bot_command", _SEARCH_ATS_MAVIS_SPEC),
     "search_ats_votonia": RegisteredTool("search_ats_votonia", "bot_command", _SEARCH_ATS_VOTONIA_SPEC),

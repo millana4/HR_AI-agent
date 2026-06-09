@@ -7,11 +7,9 @@ from app.llm.prompts_gigachat import (
 
 
 def test_system_prompt_mentions_all_tools():
-    """В промпте упомянуты все 9 tools (для триггера правильных вызовов)."""
+    """В промпте упомянуты все 7 tools (для триггера правильных вызовов)."""
     tools = [
-        "search_faq",
-        "search_documents",
-        "search_wiki",
+        "search_internal",
         "search_contacts",
         "search_ats_mavis",
         "search_ats_votonia",
@@ -35,7 +33,6 @@ def test_system_prompt_forbids_markdown():
 
 def test_system_prompt_in_russian():
     """Промпт на русском — критично для GigaChat."""
-    # Считаем кириллические буквы — их должно быть много
     cyrillic_count = sum(1 for ch in SYSTEM_PROMPT if "а" <= ch.lower() <= "я")
     assert cyrillic_count > 500
 
@@ -43,18 +40,17 @@ def test_system_prompt_in_russian():
 def test_make_context_prompt_includes_tool_and_context():
     """Контекстный промпт включает имя tool и сам контекст."""
     prompt = make_context_prompt(
-        tool_name="search_faq",
+        tool_name="search_internal",
         context="Вопрос: X. Ответ: Y.",
     )
-    assert "search_faq" in prompt
+    assert "search_internal" in prompt
     assert "Вопрос: X. Ответ: Y." in prompt
 
 
 def test_make_context_prompt_with_empty_context():
     """Пустой контекст не ломает форматирование."""
-    prompt = make_context_prompt(tool_name="search_faq", context="")
-    assert "search_faq" in prompt
-    # Шаблон не должен падать на пустой строке
+    prompt = make_context_prompt(tool_name="search_internal", context="")
+    assert "search_internal" in prompt
     assert isinstance(prompt, str)
 
 

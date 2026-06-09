@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.error_handlers import (
@@ -143,3 +144,31 @@ app.add_exception_handler(AgentError, agent_error_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app.include_router(router, prefix="/api")
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    openapi_schema["components"]["securitySchemes"] = {
+        "ApiKeyAuth": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-API-Key",
+        }
+    }
+    # Применяем ко всем путям, кроме /api/health.
+    for path, methods in openapi_schema["paths"].items():
+        if path.endswith("/health"):
+            continue
+        for method in methods.values():
+            method["security"] = [{"ApiKeyAuth": []}]
+    app.openapi_schema = openapi_schema
+    return openapi_schema
+
+
+app.openapi = custom_openapi

@@ -55,11 +55,11 @@ def test_text_response_valid():
     """Валидный текстовый ответ."""
     resp = TextResponse(
         answer="Ответ",
-        tool_used="search_faq",
+        tool_used="search_internal",
         correlation_id="abc123",
     )
     assert resp.response_type == "text"
-    assert resp.tool_used == "search_faq"
+    assert resp.tool_used == "search_internal"
 
 
 def test_text_response_wrong_tool_rejected():
