@@ -18,6 +18,7 @@ import pytest
 
 from app.api.schemas import TextResponse, ToolCallResponse
 from app.llm.base import LLMResponse, ToolCall as LLMToolCall
+from app.rag.qdrant_store import SearchResult
 from app.services.agent_loop import AgentLoop, process_request
 from app.services.pii_parser import PiiParseResult
 
@@ -51,11 +52,33 @@ def agent():
 
     nocodb_client = MagicMock()
 
+    # Qdrant и embedder — моки. По умолчанию поиск возвращает один
+    # осмысленный результат, чтобы Pass 2 имел непустой контекст.
+    # Тесты, которым нужно иное, переопределяют search.return_value.
+    embedder = AsyncMock()
+    embedder.embed_query = AsyncMock(return_value=[0.1] * 1024)
+
+    qdrant_store = AsyncMock()
+    qdrant_store.search = AsyncMock(
+        return_value=[
+            SearchResult(
+                source_type="faq",
+                source_id="nocodb_id:1",
+                title="Вопрос про отпуск",
+                text="Вопрос: Как оформить отпуск? Ответ: Через отдел кадров.",
+                chunk_index=0,
+                score=0.9,
+            )
+        ]
+    )
+
     return AgentLoop(
         llm=llm,
         session_store=session_store,
         pii_parser=pii_parser,
         nocodb_client=nocodb_client,
+        qdrant_store=qdrant_store,
+        embedder=embedder,
     )
 
 
@@ -182,6 +205,37 @@ async def test_pass1_bot_command_does_not_call_pass2(agent):
     assert agent.llm.chat.await_count == 1
 
 
+async def test_bot_command_restores_real_name_in_args(agent):
+    """В args bot_command [NAME] заменяется на реальную фамилию для бота.
+
+    Запрос пользователя маскируется до LLM, LLM возвращает search_contacts
+    с args={"query": "[NAME]"}. Боту должна уйти реальная фамилия, иначе
+    поиск по справочнику не сработает.
+    """
+    agent.pii_parser.parse = MagicMock(
+        return_value=_make_pii_result("Найди телефон [NAME]", ["Иванов"])
+    )
+    agent.llm.chat = AsyncMock(
+        return_value=LLMResponse(
+            type="tool_calls",
+            content="",
+            tool_calls=[
+                LLMToolCall(name="search_contacts", args={"query": "[NAME]"})
+            ],
+        )
+    )
+
+    result = await process_request(
+        agent=agent,
+        user_id=123,
+        request_text="Найди телефон Иванова",
+        correlation_id="cid-bc",
+    )
+
+    assert isinstance(result, ToolCallResponse)
+    assert result.tool_calls[0].args == {"query": "Иванов"}
+
+
 # ============================================
 # Сценарий 3: Pass 1 → agent_internal → Pass 2
 # ============================================
@@ -215,7 +269,28 @@ async def test_agent_internal_runs_two_passes(agent):
 
 
 async def test_agent_internal_pass2_receives_tool_context(agent):
-    """Pass 2 получает messages с make_context_prompt от tool."""
+    """Pass 2 получает messages с make_context_prompt от tool.
+
+    Раньше tool был заглушкой и эхо-ил запрос в контекст. Теперь tool —
+    реальный Qdrant-поиск, поэтому проверяем:
+    - имя tool попало в промпт Pass 2;
+    - контекст содержит текст найденного чанка (из мок-поиска);
+    - запрос ушёл в embed_query;
+    - поиск выполнен с фильтром source_type=faq;
+    - на Pass 2 tools=None.
+    """
+    agent.qdrant_store.search = AsyncMock(
+        return_value=[
+            SearchResult(
+                source_type="faq",
+                source_id="nocodb_id:7",
+                title="График работы",
+                text="Вопрос: Какой график? Ответ: с 9 до 18.",
+                chunk_index=0,
+                score=0.95,
+            )
+        ]
+    )
     agent.llm.chat = AsyncMock(
         side_effect=[
             LLMResponse(
@@ -236,15 +311,21 @@ async def test_agent_internal_pass2_receives_tool_context(agent):
         correlation_id="cid-3",
     )
 
-    # Второй вызов LLM — Pass 2 с контекстом от tool
+    # Второй вызов LLM — Pass 2 с контекстом от tool.
     pass2_call = agent.llm.chat.await_args_list[1]
     pass2_messages = pass2_call.kwargs["messages"]
-    # Последнее сообщение должно содержать упоминание tool и заглушку
     last_msg_content = pass2_messages[-1].content
     assert "search_faq" in last_msg_content
-    assert "график" in last_msg_content
-    # На втором проходе tools=None
+    # Контекст собран из найденного чанка.
+    assert "с 9 до 18" in last_msg_content
+    # На втором проходе tools не передаются.
     assert pass2_call.kwargs["tools"] is None
+
+    # Запрос ушёл в эмбеддер; поиск — с фильтром faq.
+    agent.embedder.embed_query.assert_awaited_once()
+    assert agent.embedder.embed_query.await_args.args[0] == "график"
+    search_kwargs = agent.qdrant_store.search.await_args.kwargs
+    assert search_kwargs["source_types"] == ["faq"]
 
 
 async def test_agent_internal_saves_masked_assistant_to_redis(agent):

@@ -64,7 +64,7 @@ async def test_upsert_and_search(store: QdrantStore):
         ),
         QdrantChunk(
             vector=_make_fake_vector(2),
-            source_type="wiki_page",
+            source_type="wiki",
             source_id="https://std.kitdev.ru/page1",
             title="Wiki страница",
             text="Текст про регламент",
@@ -99,7 +99,7 @@ async def test_search_with_source_type_filter(store: QdrantStore):
         ),
         QdrantChunk(
             vector=_make_fake_vector(2),
-            source_type="wiki_page",
+            source_type="wiki",
             source_id="https://std.kitdev.ru/page",
             title="Wiki",
             text="wiki text",
@@ -110,10 +110,10 @@ async def test_search_with_source_type_filter(store: QdrantStore):
     results = await store.search(
         _make_fake_vector(1),
         top_k=10,
-        source_types=["wiki_page"],
+        source_types=["wiki"],
     )
     assert len(results) == 1
-    assert results[0].source_type == "wiki_page"
+    assert results[0].source_type == "wiki"
 
 
 async def test_search_with_multiple_source_types(store: QdrantStore):
@@ -137,7 +137,7 @@ async def test_search_with_multiple_source_types(store: QdrantStore):
         ),
         QdrantChunk(
             vector=_make_fake_vector(3),
-            source_type="wiki_page",
+            source_type="wiki",
             source_id="https://std.kitdev.ru/page",
             title="Wiki",
             text="wiki",

@@ -132,6 +132,9 @@ async def index_faq(
                 text=text,
                 chunk_index=0,
                 indexed_at=datetime.now(timezone.utc).isoformat(),
+                link=entry.link,
+                attachment=entry.attachment,
+                hidden_data=entry.hidden_data,
             )
             await qdrant_store.upsert([chunk], correlation_id=correlation_id)
             stats.indexed += 1

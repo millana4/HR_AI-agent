@@ -12,7 +12,7 @@ Pass 2: выполняем agent_internal tool, отдаём контекст в
 PII-политика:
   - В Redis всегда сохраняем МАСКИРОВАННЫЕ версии (с [NAME]).
   - Восстановление [NAME] → реальные имена делается только в финальном
-    тексте, который уйдёт пользователю.
+    тексте, который уйдёт пользователю, и в args для bot_command.
 """
 from dataclasses import dataclass
 
@@ -20,6 +20,8 @@ from app.api.schemas import AskResponse, TextResponse, ToolCall, ToolCallRespons
 from app.core.logging import get_logger
 from app.llm.base import BaseLLMClient, Message
 from app.llm.prompts_gigachat import SYSTEM_PROMPT, make_context_prompt
+from app.rag.embedder import Embedder
+from app.rag.qdrant_store import QdrantStore
 from app.repositories.nocodb_client import NocoDBClient
 from app.services.pii_parser import PiiParser
 from app.services.session_store import SessionStore
@@ -43,6 +45,8 @@ class AgentLoop:
     session_store: SessionStore
     pii_parser: PiiParser
     nocodb_client: NocoDBClient
+    qdrant_store: QdrantStore
+    embedder: Embedder
 
 
 async def process_request(
@@ -129,8 +133,15 @@ async def process_request(
             content=masked_query,
             correlation_id=correlation_id,
         )
+        # В args от LLM имена замаскированы как [NAME]. Бот должен получить
+        # реальные фамилии/имена, чтобы выполнить поиск по справочникам.
+        restored_args = _restore_pii_in_args(tool_args, found_names)
+        logger.info(
+            f"bot_command {tool_name}: args restored from {tool_args} to {restored_args}",
+            extra={"correlation_id": correlation_id},
+        )
         return ToolCallResponse(
-            tool_calls=[ToolCall(name=tool_name, args=tool_args)],
+            tool_calls=[ToolCall(name=tool_name, args=restored_args)],
             correlation_id=correlation_id,
         )
 
@@ -161,6 +172,8 @@ async def process_request(
     context = await execute_internal_tool(
         tool_name=tool_name,
         args=tool_args,
+        qdrant_store=agent.qdrant_store,
+        embedder=agent.embedder,
         correlation_id=correlation_id,
     )
 
@@ -192,6 +205,38 @@ async def process_request(
         tool_used=tool_name,  # type: ignore[arg-type]
         correlation_id=correlation_id,
     )
+
+
+def _restore_pii_in_args(args: dict, original_names: list[str]) -> dict:
+    """
+    Восстановить реальные имена в значениях args для bot_command.
+
+    LLM возвращает аргументы с плейсхолдерами [NAME] (например,
+    {"query": "[NAME]"}). Боту нужны реальные фамилии/имена для поиска
+    по справочникам. Подставляем found_names по порядку — так же, как
+    _restore_pii делает для финального текста.
+
+    Затрагиваем только строковые значения. Если плейсхолдеров нет —
+    возвращаем args без изменений.
+    """
+    if not original_names or not args:
+        return args
+
+    restored: dict = {}
+    name_iter = iter(original_names)
+    for key, value in args.items():
+        if isinstance(value, str) and "[NAME]" in value:
+            new_value = value
+            while "[NAME]" in new_value:
+                try:
+                    name = next(name_iter)
+                except StopIteration:
+                    break
+                new_value = new_value.replace("[NAME]", name, 1)
+            restored[key] = new_value
+        else:
+            restored[key] = value
+    return restored
 
 
 def _restore_pii(text: str, original_names: list[str]) -> str:

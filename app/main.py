@@ -31,6 +31,8 @@ from app.core.exceptions import (
 )
 from app.core.logging import get_logger, setup_logging
 from app.llm.factory import get_llm_client
+from app.rag.embedder import get_embedder
+from app.rag.qdrant_store import QdrantStore
 from app.repositories.nocodb_client import NocoDBClient
 from app.services.agent_loop import AgentLoop
 from app.services.pii_parser import PiiParser
@@ -45,7 +47,7 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """
     Старт: создаём долгоживущие клиенты и собираем AgentLoop в app.state.
-    Остановка: корректно закрываем сессии (Redis, httpx).
+    Остановка: корректно закрываем сессии (Redis, httpx, Qdrant).
     """
     logger.info("AI Agent service starting...")
 
@@ -63,12 +65,24 @@ async def lifespan(app: FastAPI):
     pii_parser = PiiParser()
     await pii_parser.ensure_ready(nocodb_client, correlation_id="startup")
 
-    # 5. Собираем AgentLoop и кладём в app.state.
+    # 5. Qdrant — векторное хранилище для RAG-поиска.
+    qdrant_store = QdrantStore()
+    await qdrant_store.connect()
+    await qdrant_store.ensure_collection(correlation_id="startup")
+
+    # 6. Embedder — модель multilingual-e5-large. Прогреваем заранее,
+    #    чтобы первый запрос пользователя не ждал загрузку ~2 ГБ модели.
+    embedder = get_embedder()
+    await embedder.embed_query("прогрев модели", correlation_id="startup")
+
+    # 7. Собираем AgentLoop и кладём в app.state.
     app.state.agent_loop = AgentLoop(
         llm=llm_client,
         session_store=session_store,
         pii_parser=pii_parser,
         nocodb_client=nocodb_client,
+        qdrant_store=qdrant_store,
+        embedder=embedder,
     )
 
     logger.info("AI Agent service started")
@@ -88,6 +102,11 @@ async def lifespan(app: FastAPI):
             await session_store.disconnect()
         except Exception as exc:
             logger.warning(f"Error disconnecting Redis: {exc}")
+
+        try:
+            await qdrant_store.disconnect()
+        except Exception as exc:
+            logger.warning(f"Error disconnecting Qdrant: {exc}")
 
         try:
             await nocodb_client.close()

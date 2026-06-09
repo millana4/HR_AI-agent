@@ -46,6 +46,10 @@ class QdrantChunk:
     text: str
     chunk_index: int = 0
     indexed_at: str | None = None  # ISO-строка времени индексации
+    # Доп. поля FAQ — не эмбеддятся, нужны при формировании ответа.
+    link: str | None = None
+    attachment: str | None = None
+    hidden_data: str | None = None
 
 
 @dataclass
@@ -58,6 +62,10 @@ class SearchResult:
     text: str
     chunk_index: int
     score: float
+    # Доп. поля FAQ (могут отсутствовать у документов/wiki).
+    link: str | None = None
+    attachment: str | None = None
+    hidden_data: str | None = None
 
 
 class QdrantStore:
@@ -152,6 +160,9 @@ class QdrantStore:
                     "text": chunk.text,
                     "chunk_index": chunk.chunk_index,
                     "indexed_at": chunk.indexed_at,
+                    "link": chunk.link,
+                    "attachment": chunk.attachment,
+                    "hidden_data": chunk.hidden_data,
                 },
             )
             for chunk in chunks
@@ -207,6 +218,9 @@ class QdrantStore:
                 text=point.payload.get("text", ""),
                 chunk_index=point.payload.get("chunk_index", 0),
                 score=point.score,
+                link=point.payload.get("link"),
+                attachment=point.payload.get("attachment"),
+                hidden_data=point.payload.get("hidden_data"),
             )
             for point in response.points
         ]
