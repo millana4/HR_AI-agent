@@ -29,6 +29,9 @@ class Config:
     AI_ANALYTICS_TABLE_ID = os.getenv("AI_ANALYTICS_TABLE_ID")
     PIVOT_TABLE_ID = os.getenv("PIVOT_TABLE_ID")
 
+    ATS_MAVIS_BOOK_ID = os.getenv("ATS_MAVIS_BOOK_ID")
+    ATS_VOTONIA_BOOK_ID = os.getenv("ATS_VOTONIA_BOOK_ID")
+
     # LLM
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gigachat")
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", 0.3))

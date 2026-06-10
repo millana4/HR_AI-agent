@@ -36,6 +36,7 @@ from app.rag.embedder import get_embedder
 from app.rag.qdrant_store import QdrantStore
 from app.repositories.nocodb_client import NocoDBClient
 from app.services.agent_loop import AgentLoop
+from app.services.departments_cache import DepartmentsCache
 from app.services.pii_parser import PiiParser
 from app.services.session_store import SessionStore
 
@@ -76,7 +77,11 @@ async def lifespan(app: FastAPI):
     embedder = get_embedder()
     await embedder.embed_query("прогрев модели", correlation_id="startup")
 
-    # 7. Собираем AgentLoop и кладём в app.state.
+    # 7. DepartmentsCache — списки отделов Мавис/Вотоня для промпта (кеш в Redis).
+    departments_cache = DepartmentsCache()
+    await departments_cache.connect()
+
+    # 8. Собираем AgentLoop и кладём в app.state.
     app.state.agent_loop = AgentLoop(
         llm=llm_client,
         session_store=session_store,
@@ -84,6 +89,7 @@ async def lifespan(app: FastAPI):
         nocodb_client=nocodb_client,
         qdrant_store=qdrant_store,
         embedder=embedder,
+        departments_cache=departments_cache,
     )
 
     logger.info("AI Agent service started")
@@ -103,6 +109,11 @@ async def lifespan(app: FastAPI):
             await session_store.disconnect()
         except Exception as exc:
             logger.warning(f"Error disconnecting Redis: {exc}")
+
+        try:
+            await departments_cache.disconnect()
+        except Exception as exc:
+            logger.warning(f"Error disconnecting DepartmentsCache: {exc}")
 
         try:
             await qdrant_store.disconnect()

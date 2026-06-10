@@ -5,8 +5,12 @@
     parser = PiiParser()
     await parser.ensure_ready(nocodb_client, correlation_id)
     result = parser.parse("Найди телефон Иванова")
-    # result.masked_text = "Найди телефон [NAME]"
+    # result.masked_text = "Найди телефон NAME_1"
     # result.found_names = ["Иванов"]
+
+Плейсхолдеры нумерованные (NAME_1, NAME_2, ...): такой формат не содержит
+спецсимволов, поэтому внешняя LLM его не искажает (в отличие от [NAME],
+у которого модель роняла скобку).
 """
 import re
 from dataclasses import dataclass, field
@@ -24,8 +28,26 @@ logger = get_logger(__name__)
 # Группа 2: всё остальное (пробелы, знаки препинания)
 _TOKEN_PATTERN = re.compile(r"([\w-]+)|([^\w-]+)", re.UNICODE)
 
-# Плейсхолдер, которым заменяем имена и фамилии в тексте
-NAME_PLACEHOLDER = "[NAME]"
+# Префикс плейсхолдера. К нему добавляется порядковый номер: NAME_1, NAME_2, ...
+NAME_PLACEHOLDER_PREFIX = "NAME_"
+
+
+def make_placeholder(index: int) -> str:
+    """Сформировать плейсхолдер по номеру: 1 → 'NAME_1'."""
+    return f"{NAME_PLACEHOLDER_PREFIX}{index}"
+
+
+def mask_for_logs(name: str) -> str:
+    """
+    Маскирование для логов и аналитики: первые 2 буквы + звёздочки.
+
+    'Иванов' → 'Ив****', 'Ян' → 'Ян', 'А' → 'А'.
+    Необратимо — используется только для чтения человеком, нигде обратно
+    не подставляется.
+    """
+    if len(name) <= 2:
+        return name
+    return name[:2] + "*" * (len(name) - 2)
 
 
 @dataclass
@@ -33,10 +55,13 @@ class PiiParseResult:
     """Результат парсинга запроса."""
 
     masked_text: str
-    """Текст с заменёнными именами/фамилиями на [NAME]."""
+    """Текст с заменёнными именами/фамилиями на NAME_1, NAME_2, ..."""
 
     found_names: list[str] = field(default_factory=list)
-    """Список найденных имён/фамилий в именительном падеже, в порядке появления."""
+    """Список найденных имён/фамилий в именительном падеже, в порядке появления.
+
+    Индекс в списке + 1 соответствует номеру плейсхолдера: found_names[0] → NAME_1.
+    """
 
 
 class PiiParser:
@@ -61,6 +86,9 @@ class PiiParser:
     def parse(self, text: str, correlation_id: str = "-") -> PiiParseResult:
         """
         Распарсить запрос пользователя.
+
+        Каждое найденное имя/фамилия заменяется на нумерованный плейсхолдер
+        NAME_1, NAME_2, ... в порядке появления.
 
         Args:
             text: исходный текст запроса
@@ -96,15 +124,17 @@ class PiiParser:
             # token — это слово
             lemma = forms.get(token.lower())
             if lemma is not None:
-                out_parts.append(NAME_PLACEHOLDER)
                 found_names.append(lemma)
+                out_parts.append(make_placeholder(len(found_names)))
             else:
                 out_parts.append(token)
 
         masked_text = "".join(out_parts)
 
+        # В лог пишем маскированные имена (2 буквы + звёздочки), не реальные.
+        logged_names = [mask_for_logs(n) for n in found_names]
         logger.debug(
-            f"PII parser output: masked={masked_text!r}, found={found_names}",
+            f"PII parser output: masked={masked_text!r}, found={logged_names}",
             extra={"correlation_id": correlation_id},
         )
 
