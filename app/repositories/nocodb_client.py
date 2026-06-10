@@ -103,3 +103,48 @@ class NocoDBClient:
             extra={"correlation_id": correlation_id},
         )
         return all_records
+
+    async def create_record(
+            self,
+            table_id: str,
+            data: dict[str, Any],
+            correlation_id: str = "-",
+    ) -> dict[str, Any]:
+        """
+        Создать запись в таблице.
+
+        Args:
+            table_id: ID таблицы в NocoDB
+            data: словарь полей записи
+            correlation_id: для трассировки
+
+        Returns:
+            Созданная запись (ответ NocoDB).
+
+        Raises:
+            RepositoryError при HTTP-ошибке или невалидном ответе.
+        """
+        url = f"{self._base_url}/api/v2/tables/{table_id}/records"
+        try:
+            response = await self._http.post(
+                url, headers=self._headers, json=data
+            )
+        except Exception as exc:
+            raise RepositoryError(f"NocoDB create request failed: {exc}") from exc
+
+        if response.status_code not in (200, 201):
+            raise RepositoryError(
+                f"NocoDB create error: HTTP {response.status_code}, "
+                f"body: {response.text[:300]}"
+            )
+
+        try:
+            body = response.json()
+        except Exception as exc:
+            raise RepositoryError(f"NocoDB returned invalid JSON: {exc}") from exc
+
+        logger.debug(
+            f"NocoDB create_record({table_id}): создана запись",
+            extra={"correlation_id": correlation_id},
+        )
+        return body

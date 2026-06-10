@@ -17,18 +17,26 @@ Pass 2 (формирование ответа): выполняем search_intern
   - bot_command и пустой поиск в историю НЕ пишутся (агент по ним не формирует
     текстовый ответ — иначе копятся непарные user-реплики и путают LLM).
 
+Аналитика:
+  - По каждому ТЕКСТОВОМУ ответу (answer_general, search_internal) фоново
+    пишем строку в NocoDB (asyncio.create_task) — не блокируя ответ.
+  - bot_command в аналитику не пишем (нет текстового ответа агента).
+
 PII-политика:
-  - В Redis всегда сохраняем МАСКИРОВАННЫЕ версии (NAME_1, NAME_2, ...).
+  - В Redis и в аналитику сохраняем МАСКИРОВАННЫЕ версии (NAME_1, NAME_2, ...).
   - Восстановление NAME_N → реальные имена делается только в том, что уходит
     наружу (финальный ответ, args для бота). В лог реальные имена не пишем —
     только маскированные (mask_for_logs: 2 буквы + звёздочки).
 
 Нумерация шагов в логах [STEP N] соответствует комментариям ниже.
 """
+import re
+import asyncio
 from dataclasses import dataclass
 
 from app.api.schemas import AskResponse, TextResponse, ToolCall, ToolCallResponse
 from app.core.logging import get_logger
+from app.repositories.analytics import save_analytics
 from app.llm.base import BaseLLMClient, Message
 from app.llm.prompts_gigachat import (
     make_context_prompt,
@@ -186,10 +194,11 @@ async def process_request(
 
     # ========================================================================
     # ШАГ 5. Ветка (a): LLM ответила текстом → answer_general.
-    #        Восстанавливаем ПД, сохраняем пару в историю, отдаём ответ.
+    #        Восстанавливаем ПД, сохраняем пару в историю, пишем аналитику,
+    #        отдаём ответ.
     # ========================================================================
     if llm_response.type == "text":
-        masked_answer = llm_response.content or ""
+        masked_answer = _strip_service_prefix(llm_response.content or "")
         final_answer = _restore_pii(masked_answer, found_names)
         logger.debug(
             f"[STEP 5] answer_general. masked_answer={masked_answer!r} → "
@@ -204,6 +213,15 @@ async def process_request(
             masked_assistant_msg=masked_answer,
             correlation_id=correlation_id,
         )
+        # Аналитика — фоново, маскированные версии (без ПД).
+        await asyncio.create_task(save_analytics(
+            nocodb_client=agent.nocodb_client,
+            user_id=user_id,
+            masked_question=masked_query,
+            masked_answer=masked_answer,
+            tool_used="answer_general",
+            correlation_id=correlation_id,
+        ))
         return TextResponse(
             answer=final_answer,
             tool_used="answer_general",
@@ -224,7 +242,7 @@ async def process_request(
     # ========================================================================
     # ШАГ 7. Ветка (c): bot_command (контакты, телефоны, форма HR).
     #        Возвращаем боту команду. Восстанавливаем ПД в args.
-    #        В историю НЕ пишем (агент не формирует текстовый ответ).
+    #        В историю и аналитику НЕ пишем (агент не формирует текстовый ответ).
     # ========================================================================
     if is_bot_command(tool_name):
         restored_args = _restore_pii_in_args(tool_args, found_names)
@@ -234,6 +252,16 @@ async def process_request(
             f"{_mask_args_for_logs(restored_args, found_names)}",
             extra={"correlation_id": correlation_id},
         )
+        # Аналитика — фоново. Для bot_command текст ответа формирует бот,
+        # поэтому пишем только вопрос и название tool, Answer пустой.
+        await asyncio.create_task(save_analytics(
+            nocodb_client=agent.nocodb_client,
+            user_id=user_id,
+            masked_question=masked_query,
+            masked_answer="",
+            tool_used=tool_name,
+            correlation_id=correlation_id,
+        ))
         return ToolCallResponse(
             tool_calls=[ToolCall(name=tool_name, args=restored_args)],
             correlation_id=correlation_id,
@@ -283,13 +311,23 @@ async def process_request(
 
     # ========================================================================
     # ШАГ 10. Поиск пуст → предлагаем боту показать форму HR.
-    #         В историю НЕ пишем (нет текстового ответа агента).
+    #         В историю и аналитику НЕ пишем (нет текстового ответа агента).
     # ========================================================================
     if context == NO_CONTEXT:
         logger.info(
             "[STEP 10] search_internal вернул пусто — предлагаем форму HR",
             extra={"correlation_id": correlation_id},
         )
+        # Аналитика — фоново. Текст ответа отсутствует (форму показывает бот),
+        # поэтому Answer пустой, Tool_used = suggest_hr_form.
+        await asyncio.create_task(save_analytics(
+            nocodb_client=agent.nocodb_client,
+            user_id=user_id,
+            masked_question=masked_query,
+            masked_answer="",
+            tool_used="suggest_hr_form",
+            correlation_id=correlation_id,
+        ))
         return ToolCallResponse(
             tool_calls=[ToolCall(name="suggest_hr_form", args={})],
             correlation_id=correlation_id,
@@ -323,9 +361,12 @@ async def process_request(
     )
 
     # ========================================================================
-    # ШАГ 12. Восстанавливаем ПД в финальном тексте, сохраняем пару в историю.
+    # ШАГ 12. Восстанавливаем ПД в финальном тексте, сохраняем пару в историю,
+    #         пишем аналитику, отдаём ответ.
     # ========================================================================
-    masked_answer = pass2_response.content or "Не удалось сформировать ответ."
+    masked_answer = _strip_service_prefix(
+        pass2_response.content or ""
+    ) or "Не удалось сформировать ответ."
     final_answer = _restore_pii(masked_answer, found_names)
     logger.debug(
         f"[STEP 12] Pass 2 ← LLM. masked_answer={masked_answer!r} → "
@@ -340,6 +381,15 @@ async def process_request(
         masked_assistant_msg=masked_answer,
         correlation_id=correlation_id,
     )
+    # Аналитика — фоново, маскированные версии (без ПД).
+    await asyncio.create_task(save_analytics(
+        nocodb_client=agent.nocodb_client,
+        user_id=user_id,
+        masked_question=masked_query,
+        masked_answer=masked_answer,
+        tool_used=tool_name,
+        correlation_id=correlation_id,
+    ))
     return TextResponse(
         answer=final_answer,
         tool_used=tool_name,  # type: ignore[arg-type]
@@ -367,6 +417,19 @@ def _restore_pii_in_args(args: dict, original_names: list[str]) -> dict:
         else:
             restored[key] = value
     return restored
+
+
+# Префиксы, которые LLM иногда добавляет в начало ответа из промпта
+# (например, "Tool: search_internal", "answer_general:"). В ответ пользователю
+# они попадать не должны — срезаем.
+_SERVICE_PREFIX_PATTERN = re.compile(
+    r"^\s*(?:tool\s*:\s*\w+|answer_general)\s*:?\s*\n?",
+    re.IGNORECASE,
+)
+def _strip_service_prefix(text: str) -> str:
+    """Убрать служебный префикс вида 'Tool: search_internal' из начала ответа."""
+    cleaned = _SERVICE_PREFIX_PATTERN.sub("", text, count=1)
+    return cleaned.strip()
 
 
 def _restore_pii(text: str, original_names: list[str]) -> str:
