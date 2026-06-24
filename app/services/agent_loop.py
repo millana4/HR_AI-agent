@@ -35,6 +35,7 @@ import asyncio
 from dataclasses import dataclass
 
 from app.api.schemas import AskResponse, TextResponse, ToolCall, ToolCallResponse
+from app.core.config import Config
 from app.core.logging import get_logger
 from app.repositories.analytics import save_analytics
 from app.llm.base import BaseLLMClient, Message
@@ -184,6 +185,7 @@ async def process_request(
         messages=pass1_messages,
         tools=get_all_tool_specs(),
         correlation_id=correlation_id,
+        model=Config.YANDEX_MODEL_PASS1,
     )
     logger.debug(
         f"[STEP 4] Pass 1 ← LLM: type={llm_response.type}, "
@@ -358,6 +360,7 @@ async def process_request(
         messages=pass2_messages,
         tools=None,  # на втором проходе tools не нужны
         correlation_id=correlation_id,
+        model=Config.YANDEX_MODEL_PASS2,
     )
 
     # ========================================================================

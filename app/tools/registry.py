@@ -3,14 +3,13 @@
 
 Здесь описаны все tools: их JSON-схемы для LLM и тип выполнения.
 
-Tools бывают двух типов:
+Tools бывают типов:
 - agent_internal: агент выполняет инструмент сам (поиск в Qdrant),
   затем формирует финальный текстовый ответ.
 - bot_command: агент НЕ выполняет, а возвращает команду боту в формате
   ToolCallResponse. Бот сам сходит за данными и сформирует ответ пользователю.
-
-answer_general — особый случай: это НЕ tool в реестре, а ветка в agent_loop
-(LLM ответила текстом без вызова tool).
+- answer_general — agent_general: LLM выбирает его для общих вопросов (не про
+  компанию). Pass 2 формирует ответ из общих знаний, без векторного поиска.
 """
 from dataclasses import dataclass
 from typing import Literal
@@ -19,7 +18,7 @@ from app.api.schemas import AgentToolName
 from app.llm.base import ToolSpec
 
 
-ToolKind = Literal["agent_internal", "bot_command"]
+ToolKind = Literal["agent_internal", "bot_command", "agent_general"]
 
 
 @dataclass(frozen=True)
@@ -149,6 +148,21 @@ _SEARCH_DRUGSTORE_SPEC = ToolSpec(
     },
 )
 
+_ANSWER_GENERAL_SPEC = ToolSpec(
+    name="answer_general",
+    description=(
+        "Использовать, когда вопрос НЕ касается работы в компании Мавис/Вотоня/Имбирь "
+        "и не требует корпоративных данных: общие знания, бытовые вопросы, рецепты, "
+        "факты, расчёты, советы, поддержание беседы (например: «как приготовить блины», "
+        "«сколько будет 2+2», «расскажи анекдот», «столица Франции», «привет»). "
+        "Агент сформирует развёрнутый ответ из общих знаний."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {},
+    },
+)
+
 _SUGGEST_HR_FORM_SPEC = ToolSpec(
     name="suggest_hr_form",
     description=(
@@ -178,6 +192,7 @@ TOOLS: dict[str, RegisteredTool] = {
     "search_shop": RegisteredTool("search_shop", "bot_command", _SEARCH_SHOP_SPEC),
     "search_drugstore": RegisteredTool("search_drugstore", "bot_command", _SEARCH_DRUGSTORE_SPEC),
     "suggest_hr_form": RegisteredTool("suggest_hr_form", "bot_command", _SUGGEST_HR_FORM_SPEC),
+    "answer_general": RegisteredTool("answer_general", "agent_general", _ANSWER_GENERAL_SPEC),
 }
 
 
@@ -200,3 +215,11 @@ def is_agent_internal(tool_name: str) -> bool:
 def is_bot_command(tool_name: str) -> bool:
     """True если tool нужно вернуть боту для выполнения."""
     return get_tool_kind(tool_name) == "bot_command"
+
+def is_agent_general(tool_name: str) -> bool:
+    """True если tool — общий ответ (Pass 2 без векторного поиска)."""
+    return get_tool_kind(tool_name) == "agent_general"
+
+def get_all_tool_names() -> set[str]:
+    """Множество имён всех зарегистрированных инструментов."""
+    return set(TOOLS.keys())

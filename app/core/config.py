@@ -44,6 +44,16 @@ class Config:
     GIGACHAT_API_URL = os.getenv("GIGACHAT_API_URL")
     GIGACHAT_SCOPE = os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_PERS")
 
+    # Yandex AI Studio
+    YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
+    YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")
+    YANDEX_API_URL = os.getenv("YANDEX_API_URL", "https://llm.api.cloud.yandex.net/v1")
+    # Модель Pass 1 (выбор инструмента) — дешёвая. Pass 2 (ответ) — сильная.
+    YANDEX_MODEL_PASS1 = os.getenv("YANDEX_MODEL_PASS1", "yandexgpt-5-lite")
+    YANDEX_MODEL_PASS2 = os.getenv("YANDEX_MODEL_PASS2", "deepseek-v4-flash")
+    # Модель генерации изображений (YandexART, Images API — отдельный эндпоинт)
+    YANDEX_ART_MODEL = os.getenv("YANDEX_ART_MODEL", "yandex-art-2.0")
+
     # Redis
     REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))

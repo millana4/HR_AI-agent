@@ -7,7 +7,7 @@ import pytest
 
 from app.core.exceptions import LLMError, LLMTimeoutError
 from app.llm.base import Message, ToolSpec
-from app.llm.gigachat import GigaChatClient, LLMQuotaExhaustedError
+from app.llm.gigachat_client import GigaChatClient, LLMQuotaExhaustedError
 
 
 @pytest.fixture

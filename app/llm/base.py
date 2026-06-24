@@ -73,10 +73,11 @@ class BaseLLMClient(ABC):
 
     @abstractmethod
     async def chat(
-        self,
-        messages: list[Message],
-        tools: list[ToolSpec] | None = None,
-        correlation_id: str = "-",
+            self,
+            messages: list[Message],
+            tools: list[ToolSpec] | None = None,
+            correlation_id: str = "-",
+            model: str | None = None,
     ) -> LLMResponse:
         """
         Отправить запрос в LLM.
@@ -85,6 +86,7 @@ class BaseLLMClient(ABC):
             messages: история разговора (system + user + assistant)
             tools: список доступных tools для function calling. Опционально.
             correlation_id: для трассировки в логах.
+            model: какую модель использовать. Если None — реализация берёт свою по умолчанию.
 
         Returns:
             LLMResponse с типом text или tool_calls.

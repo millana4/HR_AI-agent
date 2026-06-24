@@ -102,12 +102,16 @@ class GigaChatClient(BaseLLMClient):
     # ============================================
 
     async def chat(
-        self,
-        messages: list[Message],
-        tools: list[ToolSpec] | None = None,
-        correlation_id: str = "-",
+            self,
+            messages: list[Message],
+            tools: list[ToolSpec] | None = None,
+            correlation_id: str = "-",
+            model: str | None = None,
     ) -> LLMResponse:
-        """Отправить запрос в GigaChat. Пробует модели по приоритету при исчерпании квот."""
+        """Отправить запрос в GigaChat. Пробует модели по приоритету при исчерпании квот.
+        Параметр model игнорируется: GigaChat использует свою стратегию
+        приоритета моделей (Max → Pro → Lite). Принят для совместимости интерфейса.
+        """
         access_token = await self._get_access_token(correlation_id)
         request_body_base = self._build_request_body(messages, tools)
 

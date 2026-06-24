@@ -4,19 +4,24 @@
 from app.core.config import Config
 from app.core.exceptions import ConfigError
 from app.llm.base import BaseLLMClient
-from app.llm.gigachat import GigaChatClient
+from app.llm.gigachat_client import GigaChatClient
+from app.llm.yandex_client import YandexClient
 
 
-def get_llm_client() -> BaseLLMClient:
+def get_llm_client(provider: str | None = None) -> BaseLLMClient:
     """
-    Создать LLM-клиент по конфигу.
+    Создать LLM-клиент по конфигу или явно указанному провайдеру.
 
-    Сейчас поддерживается только gigachat. Когда появится другой провайдер
-    (например, minimax) — добавится новая ветка if/elif.
+    Args:
+        provider: имя провайдера ("yandex" / "gigachat"). Если None —
+            берётся Config.LLM_PROVIDER. Явный параметр нужен для fallback
+            (шаг 7): создать запасной GigaChat-клиент независимо от конфига.
     """
-    provider = Config.LLM_PROVIDER.lower()
+    name = (provider or Config.LLM_PROVIDER).lower()
 
-    if provider == "gigachat":
+    if name == "yandex":
+        return YandexClient()
+    if name == "gigachat":
         return GigaChatClient()
 
-    raise ConfigError(f"Unsupported LLM_PROVIDER: {Config.LLM_PROVIDER}")
+    raise ConfigError(f"Unsupported LLM_PROVIDER: {name}")

@@ -5,7 +5,7 @@ import pytest
 
 from app.core.exceptions import ConfigError
 from app.llm.factory import get_llm_client
-from app.llm.gigachat import GigaChatClient
+from app.llm.gigachat_client import GigaChatClient
 
 
 def test_factory_returns_gigachat_client():
