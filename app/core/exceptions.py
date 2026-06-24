@@ -20,6 +20,15 @@ class LLMTimeoutError(LLMError):
     """LLM не ответила в отведённое время."""
 
 
+class LLMAuthError(LLMError):
+    """
+    LLM отвергла запрос по авторизации/оплате (HTTP 401/403).
+
+    Для Yandex это сигнал «кончились деньги или невалидный ключ» — повод
+    для алерта администраторам (в отличие от временных сбоев).
+    """
+
+
 class ToolExecutionError(AgentError):
     """Ошибка выполнения tool."""
 

@@ -74,6 +74,7 @@ class AgentLoop:
     embedder: Embedder
     departments_cache: DepartmentsCache
     address_cache: AddressCache
+    fallback_llm: BaseLLMClient | None = None
 
 
 def _mask_text_for_logs(text: str, original_names: list[str]) -> str:

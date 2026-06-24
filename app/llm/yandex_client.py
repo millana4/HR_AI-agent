@@ -20,7 +20,7 @@ from typing import Any
 import httpx
 
 from app.core.config import Config
-from app.core.exceptions import LLMError, LLMTimeoutError
+from app.core.exceptions import LLMError, LLMTimeoutError, LLMAuthError
 from app.core.logging import get_logger
 from app.llm.base import BaseLLMClient, LLMResponse, Message, ToolCall, ToolSpec
 from app.tools.registry import TOOLS, get_all_tool_names
@@ -89,6 +89,12 @@ class YandexClient(BaseLLMClient):
         except Exception as exc:
             raise LLMError(f"Yandex request failed: {exc}") from exc
 
+        if response.status_code in (401, 403):
+            # Невалидный ключ или нет средств — повод для алерта.
+            raise LLMAuthError(
+                f"Yandex auth/payment error: HTTP {response.status_code}, "
+                f"body: {response.text[:300]}"
+            )
         if response.status_code != 200:
             raise LLMError(
                 f"Yandex error: HTTP {response.status_code}, "

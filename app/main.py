@@ -22,6 +22,7 @@ from app.api.middleware import (
     LoggingMiddleware,
 )
 from app.api.routes import router
+from app.core.config import Config
 from app.core.exceptions import (
     AgentError,
     AuthError,
@@ -61,8 +62,14 @@ async def lifespan(app: FastAPI):
     session_store = SessionStore()
     await session_store.connect()
 
-    # 3. LLM-клиент по конфигу (сейчас — GigaChat).
+    # 3. Основной LLM-клиент по конфигу (Yandex).
     llm_client = get_llm_client()
+
+    #     Запасной клиент GigaChat для fallback — создаём, только если
+    #     основной провайдер не GigaChat (иначе незачем дублировать).
+    fallback_llm = None
+    if Config.LLM_PROVIDER.lower() != "gigachat":
+        fallback_llm = get_llm_client(provider="gigachat")
 
     # 4. PiiParser — заранее прогреваем кэш PII-имён из NocoDB.
     pii_parser = PiiParser()
@@ -97,6 +104,7 @@ async def lifespan(app: FastAPI):
         embedder=embedder,
         departments_cache=departments_cache,
         address_cache=address_cache,
+        fallback_llm=fallback_llm,
     )
 
     logger.info("AI Agent service started")
@@ -111,6 +119,12 @@ async def lifespan(app: FastAPI):
             await llm_client.close()
         except Exception as exc:
             logger.warning(f"Error closing LLM client: {exc}")
+
+        if fallback_llm is not None:
+            try:
+                await fallback_llm.close()
+            except Exception as exc:
+                logger.warning(f"Error closing fallback LLM client: {exc}")
 
         try:
             await session_store.disconnect()
