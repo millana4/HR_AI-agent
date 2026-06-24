@@ -31,6 +31,8 @@ class Config:
 
     ATS_MAVIS_BOOK_ID = os.getenv("ATS_MAVIS_BOOK_ID")
     ATS_VOTONIA_BOOK_ID = os.getenv("ATS_VOTONIA_BOOK_ID")
+    SHOP_TABLE_ID = os.getenv("SHOP_TABLE_ID")
+    DRUGSTORE_TABLE_ID = os.getenv("DRUGSTORE_TABLE_ID")
 
     # LLM
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gigachat")

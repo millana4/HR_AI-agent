@@ -35,6 +35,7 @@ from app.llm.factory import get_llm_client
 from app.rag.embedder import get_embedder
 from app.rag.qdrant_store import QdrantStore
 from app.repositories.nocodb_client import NocoDBClient
+from app.services.address_cache import get_address_cache
 from app.services.agent_loop import AgentLoop
 from app.services.departments_cache import DepartmentsCache
 from app.services.pii_parser import PiiParser
@@ -81,7 +82,12 @@ async def lifespan(app: FastAPI):
     departments_cache = DepartmentsCache()
     await departments_cache.connect()
 
-    # 8. Собираем AgentLoop и кладём в app.state.
+    # 8. AddressCache — словарь адресов магазинов/аптек для каскадной
+    #     классификации (извлечение топонима в query). Прогреваем при старте.
+    address_cache = get_address_cache()
+    await address_cache.ensure_fresh(nocodb_client, correlation_id="startup")
+
+    # 9. Собираем AgentLoop и кладём в app.state.
     app.state.agent_loop = AgentLoop(
         llm=llm_client,
         session_store=session_store,
@@ -90,6 +96,7 @@ async def lifespan(app: FastAPI):
         qdrant_store=qdrant_store,
         embedder=embedder,
         departments_cache=departments_cache,
+        address_cache=address_cache,
     )
 
     logger.info("AI Agent service started")

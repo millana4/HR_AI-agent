@@ -46,6 +46,7 @@ from app.llm.prompts_gigachat import (
 from app.rag.embedder import Embedder
 from app.rag.qdrant_store import QdrantStore
 from app.repositories.nocodb_client import NocoDBClient
+from app.services.address_cache import AddressCache
 from app.services.departments_cache import DepartmentsCache
 from app.services.pii_parser import PiiParser, make_placeholder, mask_for_logs
 from app.services.session_store import SessionStore
@@ -72,6 +73,7 @@ class AgentLoop:
     qdrant_store: QdrantStore
     embedder: Embedder
     departments_cache: DepartmentsCache
+    address_cache: AddressCache
 
 
 def _mask_text_for_logs(text: str, original_names: list[str]) -> str:

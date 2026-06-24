@@ -160,6 +160,26 @@ async def process_request_yandex(
     # ШАГ 7. bot_command (контакты, телефоны, магазины, аптеки, форма HR).
     #        Возвращаем боту команду. ПД восстанавливаем в args.
     if is_bot_command(tool_name):
+        # Для магазинов/аптек извлекаем топоним (улица в приоритете, иначе
+        # город) из словаря адресов и кладём в query — точнее, чем LLM.
+        if tool_name in ("search_shop", "search_drugstore"):
+            await agent.address_cache.ensure_fresh(
+                agent.nocodb_client, correlation_id=correlation_id
+            )
+            topo = agent.address_cache.extract_address(masked_query)
+            if topo:
+                logger.debug(
+                    f"[YA STEP 7] Адрес из словаря: {topo!r} "
+                    f"(было от LLM: {tool_args.get('query')!r})",
+                    extra={"correlation_id": correlation_id},
+                )
+                tool_args = {**tool_args, "query": topo}
+            else:
+                logger.debug(
+                    "[YA STEP 7] Адрес в словаре не найден — оставляем query от LLM",
+                    extra={"correlation_id": correlation_id},
+                )
+
         restored_args = restore_pii_in_args(tool_args, found_names)
         logger.debug(
             f"[YA STEP 7] bot_command {tool_name}: "
