@@ -33,6 +33,7 @@ from app.core.exceptions import (
 )
 from app.core.logging import get_logger, setup_logging
 from app.llm.factory import get_llm_client
+from app.llm.yandex_art_client import YandexArtClient
 from app.rag.embedder import get_embedder
 from app.rag.qdrant_store import QdrantStore
 from app.repositories.nocodb_client import NocoDBClient
@@ -71,6 +72,12 @@ async def lifespan(app: FastAPI):
     if Config.LLM_PROVIDER.lower() != "gigachat":
         fallback_llm = get_llm_client(provider="gigachat")
 
+    #     Клиент Alice AI ART для генерации картинок — только при Yandex.
+    #     При gigachat картинки недоступны, клиент не создаём.
+    art_client = None
+    if Config.LLM_PROVIDER.lower() == "yandex":
+        art_client = YandexArtClient()
+
     # 4. PiiParser — заранее прогреваем кэш PII-имён из NocoDB.
     pii_parser = PiiParser()
     await pii_parser.ensure_ready(nocodb_client, correlation_id="startup")
@@ -105,6 +112,7 @@ async def lifespan(app: FastAPI):
         departments_cache=departments_cache,
         address_cache=address_cache,
         fallback_llm=fallback_llm,
+        art_client=art_client,
     )
 
     logger.info("AI Agent service started")
@@ -125,6 +133,12 @@ async def lifespan(app: FastAPI):
                 await fallback_llm.close()
             except Exception as exc:
                 logger.warning(f"Error closing fallback LLM client: {exc}")
+
+        if art_client is not None:
+            try:
+                await art_client.close()
+            except Exception as exc:
+                logger.warning(f"Error closing art client: {exc}")
 
         try:
             await session_store.disconnect()
@@ -175,7 +189,7 @@ app.add_exception_handler(RepositoryError, repository_error_handler)
 app.add_exception_handler(AgentError, agent_error_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
-app.include_router(router, prefix="/api")
+app.include_router(router, prefix="/api/v1")
 
 def custom_openapi():
     if app.openapi_schema:

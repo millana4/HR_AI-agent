@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from app.core.logging import get_logger
 from app.llm.base import BaseLLMClient
+from app.llm.yandex_art_client import YandexArtClient
 from app.rag.embedder import Embedder
 from app.rag.qdrant_store import QdrantStore
 from app.repositories.nocodb_client import NocoDBClient
@@ -48,6 +49,7 @@ class AgentLoop:
     departments_cache: DepartmentsCache
     address_cache: AddressCache
     fallback_llm: BaseLLMClient | None = None
+    art_client: "YandexArtClient | None" = None
 
 
 # Префиксы, которые LLM иногда добавляет в начало ответа из промпта

@@ -53,8 +53,10 @@ class Config:
     # Модель Pass 1 (выбор инструмента) — дешёвая. Pass 2 (ответ) — сильная.
     YANDEX_MODEL_PASS1 = os.getenv("YANDEX_MODEL_PASS1", "yandexgpt-5-lite")
     YANDEX_MODEL_PASS2 = os.getenv("YANDEX_MODEL_PASS2", "deepseek-v4-flash")
-    # Модель генерации изображений (YandexART, Images API — отдельный эндпоинт)
-    YANDEX_ART_MODEL = os.getenv("YANDEX_ART_MODEL", "yandex-art-2.0")
+    # Alice AI ART (генерация изображений). Sync OpenAI-совместимый Images API.
+    YANDEX_ART_MODEL = os.getenv("YANDEX_ART_MODEL", "aliceai-image-art-3.0/latest")
+    YANDEX_ART_API_URL = os.getenv("YANDEX_ART_API_URL", "https://ai.api.cloud.yandex.net/v1")
+    YANDEX_ART_TIMEOUT = float(os.getenv("YANDEX_ART_TIMEOUT", "60.0"))
 
     # Redis
     REDIS_HOST = os.getenv("REDIS_HOST", "localhost")

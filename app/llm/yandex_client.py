@@ -108,10 +108,10 @@ class YandexClient(BaseLLMClient):
     # ============================================
 
     def _build_request_body(
-        self,
-        messages: list[Message],
-        tools: list[ToolSpec] | None,
-        model_uri: str,
+            self,
+            messages: list[Message],
+            tools: list[ToolSpec] | None,
+            model_uri: str,
     ) -> dict[str, Any]:
         """Сформировать тело запроса в OpenAI-совместимом формате."""
         body: dict[str, Any] = {
@@ -122,6 +122,12 @@ class YandexClient(BaseLLMClient):
             "temperature": Config.LLM_TEMPERATURE,
             "max_tokens": Config.LLM_MAX_TOKENS,
         }
+
+        # DeepSeek — reasoning-модель: по умолчанию генерирует внутренние
+        # рассуждения (reasoning_content), которые тратят токены и время, но
+        # пользователю не нужны. Отключаем их. Для lite параметра быть не должно.
+        if "deepseek" in model_uri.lower():
+            body["reasoning_effort"] = "none"
 
         if tools:
             # Современный OpenAI-формат: tools + tool_choice

@@ -121,9 +121,33 @@ class ToolCallResponse(BaseModel):
         "Пользователю не показывается.",
     )
 
-# Type alias для ответа эндпоинта /api/ask
-AskResponse = TextResponse | ToolCallResponse
 
+# ============================================
+#  Изображение
+# ============================================
+
+class ImageResponse(BaseModel):
+    """Ответ с изображением — сгенерированная картинка для пользователя."""
+
+    response_type: Literal["image"] = "image"
+    image_base64: str = Field(
+        description="Изображение JPEG в кодировке Base64 (без префикса data:)"
+    )
+    caption: str = Field(
+        default="",
+        description="Подпись к изображению (необязательно)",
+    )
+    tool_used: Literal["generate_image"] = "generate_image"
+    correlation_id: str
+    alert: Alert | None = Field(
+        default=None,
+        description="Служебное уведомление админам (если было событие). "
+        "Пользователю не показывается.",
+    )
+
+
+# Type alias для ответа эндпоинта /api/ask
+AskResponse = TextResponse | ToolCallResponse | ImageResponse
 
 # ============================================
 # Ошибка

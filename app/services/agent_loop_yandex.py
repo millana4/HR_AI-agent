@@ -20,7 +20,13 @@ PII и аналитика — как в GigaChat-петле (общие хелп
 """
 import asyncio
 
-from app.api.schemas import AskResponse, TextResponse, ToolCall, ToolCallResponse
+from app.api.schemas import (
+    AskResponse,
+    ImageResponse,
+    TextResponse,
+    ToolCall,
+    ToolCallResponse,
+)
 from app.core.config import Config
 from app.core.logging import get_logger
 from app.llm.base import Message
@@ -43,6 +49,7 @@ from app.services.pii_parser import mask_for_logs
 from app.tools.registry import (
     get_all_tool_specs,
     is_agent_general,
+    is_agent_image,
     is_agent_internal,
     is_bot_command,
 )
@@ -199,7 +206,45 @@ async def process_request_yandex(
             correlation_id=correlation_id,
         )
 
-    # ШАГ 8. answer_general — общий вопрос. Pass 2 на deepseek БЕЗ Qdrant.
+    # ШАГ 8. generate_image — генерация картинки через Alice AI ART.
+    if is_agent_image(tool_name):
+        logger.info(
+            "[YA STEP 7b] generate_image → Alice AI ART",
+            extra={"correlation_id": correlation_id},
+        )
+        if agent.art_client is None:
+            logger.warning(
+                "[YA STEP 7b] art_client недоступен — заглушка",
+                extra={"correlation_id": correlation_id},
+            )
+            return TextResponse(
+                answer="Генерация изображений сейчас недоступна.",
+                tool_used="answer_general",
+                correlation_id=correlation_id,
+            )
+
+        # Промпт для картинки — маскированный (ПД в YandexART не уходят).
+        # Берём prompt из аргументов tool, иначе — сам запрос.
+        image_prompt = tool_args.get("prompt") or masked_query
+        image_b64 = await agent.art_client.generate_image(
+            prompt=image_prompt, correlation_id=correlation_id
+        )
+        # Аналитику пишем (вопрос + tool), сам ответ — картинка, текст пустой.
+        asyncio.create_task(save_analytics(
+            nocodb_client=agent.nocodb_client,
+            user_id=user_id,
+            masked_question=masked_query,
+            masked_answer="[image]",
+            tool_used="generate_image",
+            correlation_id=correlation_id,
+        ))
+        return ImageResponse(
+            image_base64=image_b64,
+            caption="",
+            correlation_id=correlation_id,
+        )
+
+    # ШАГ 9. answer_general — общий вопрос. Pass 2 на deepseek БЕЗ Qdrant.
     if is_agent_general(tool_name):
         logger.info(
             "[YA STEP 8] answer_general → Pass 2 deepseek (без векторного поиска)",
@@ -210,7 +255,7 @@ async def process_request_yandex(
             history_messages, correlation_id,
         )
 
-    # ШАГ 9. search_internal — векторный поиск, затем Pass 2 с контекстом.
+    # ШАГ 10. search_internal — векторный поиск, затем Pass 2 с контекстом.
     if is_agent_internal(tool_name):
         context = await execute_internal_tool(
             tool_name=tool_name,
@@ -248,7 +293,7 @@ async def process_request_yandex(
             history_messages, tool_name, context, correlation_id,
         )
 
-    # ШАГ 10. Неизвестный tool — защита.
+    # ШАГ 11. Неизвестный tool — защита.
     logger.warning(
         f"[YA STEP 10] Неизвестный tool: {tool_name} — fallback",
         extra={"correlation_id": correlation_id},

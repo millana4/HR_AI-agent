@@ -18,7 +18,7 @@ from app.api.schemas import AgentToolName
 from app.llm.base import ToolSpec
 
 
-ToolKind = Literal["agent_internal", "bot_command", "agent_general"]
+ToolKind = Literal["agent_internal", "bot_command", "agent_general", "agent_image"]
 
 
 @dataclass(frozen=True)
@@ -163,6 +163,29 @@ _ANSWER_GENERAL_SPEC = ToolSpec(
     },
 )
 
+
+_GENERATE_IMAGE_SPEC = ToolSpec(
+    name="generate_image",
+    description=(
+        "Сгенерировать изображение по текстовому описанию. Использовать, когда "
+        "пользователь просит нарисовать, сгенерировать, создать картинку или "
+        "изображение (например: «нарисуй кота», «сгенерируй закат над морем», "
+        "«создай картинку с логотипом»). В параметре prompt передай описание "
+        "того, что нужно нарисовать."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": "Описание изображения для генерации",
+            },
+        },
+        "required": ["prompt"],
+    },
+)
+
+
 _SUGGEST_HR_FORM_SPEC = ToolSpec(
     name="suggest_hr_form",
     description=(
@@ -193,6 +216,7 @@ TOOLS: dict[str, RegisteredTool] = {
     "search_drugstore": RegisteredTool("search_drugstore", "bot_command", _SEARCH_DRUGSTORE_SPEC),
     "suggest_hr_form": RegisteredTool("suggest_hr_form", "bot_command", _SUGGEST_HR_FORM_SPEC),
     "answer_general": RegisteredTool("answer_general", "agent_general", _ANSWER_GENERAL_SPEC),
+    "generate_image": RegisteredTool("generate_image", "agent_image", _GENERATE_IMAGE_SPEC),
 }
 
 
@@ -219,6 +243,10 @@ def is_bot_command(tool_name: str) -> bool:
 def is_agent_general(tool_name: str) -> bool:
     """True если tool — общий ответ (Pass 2 без векторного поиска)."""
     return get_tool_kind(tool_name) == "agent_general"
+
+def is_agent_image(tool_name: str) -> bool:
+    """True если tool — генерация изображения."""
+    return get_tool_kind(tool_name) == "agent_image"
 
 def get_all_tool_names() -> set[str]:
     """Множество имён всех зарегистрированных инструментов."""

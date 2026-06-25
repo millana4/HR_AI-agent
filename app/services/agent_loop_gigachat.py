@@ -36,6 +36,7 @@ from app.services.pii_parser import mask_for_logs
 from app.tools.registry import (
     get_all_tool_specs,
     is_agent_general,
+    is_agent_image,
     is_agent_internal,
     is_bot_command,
 )
@@ -159,6 +160,18 @@ async def process_request_gigachat(
         ))
         return ToolCallResponse(
             tool_calls=[ToolCall(name=tool_name, args=restored_args)],
+            correlation_id=correlation_id,
+        )
+
+    # generate_image: GigaChat картинки не умеет (это fallback) — заглушка.
+    if is_agent_image(tool_name):
+        logger.info(
+            "[GC] generate_image недоступен на GigaChat — заглушка",
+            extra={"correlation_id": correlation_id},
+        )
+        return TextResponse(
+            answer="Генерация изображений сейчас недоступна, попробуйте позже.",
+            tool_used="answer_general",
             correlation_id=correlation_id,
         )
 
