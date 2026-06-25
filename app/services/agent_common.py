@@ -14,13 +14,40 @@ PII-политика (едина для обеих петель):
   (финальный ответ, args для бота). В лог реальные имена не пишем.
 """
 import re
+from dataclasses import dataclass
 
 from app.core.logging import get_logger
-from app.services.pii_parser import make_placeholder, mask_for_logs
+from app.llm.base import BaseLLMClient
+from app.rag.embedder import Embedder
+from app.rag.qdrant_store import QdrantStore
+from app.repositories.nocodb_client import NocoDBClient
+from app.services.address_cache import AddressCache
+from app.services.departments_cache import DepartmentsCache
+from app.services.pii_parser import PiiParser, make_placeholder, mask_for_logs
 from app.services.session_store import SessionStore
 
 
 logger = get_logger(__name__)
+
+@dataclass
+class AgentLoop:
+    """
+    Композиция зависимостей для обработки запросов (общая для обеих петель).
+
+    Создаётся один раз при старте FastAPI (см. lifespan в app/main.py).
+    Все клиенты — долгоживущие. Поле llm — основной провайдер; fallback_llm —
+    запасной (GigaChat), используется при сбое основного.
+    """
+
+    llm: BaseLLMClient
+    session_store: SessionStore
+    pii_parser: PiiParser
+    nocodb_client: NocoDBClient
+    qdrant_store: QdrantStore
+    embedder: Embedder
+    departments_cache: DepartmentsCache
+    address_cache: AddressCache
+    fallback_llm: BaseLLMClient | None = None
 
 
 # Префиксы, которые LLM иногда добавляет в начало ответа из промпта

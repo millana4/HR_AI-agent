@@ -37,7 +37,7 @@ from app.rag.embedder import get_embedder
 from app.rag.qdrant_store import QdrantStore
 from app.repositories.nocodb_client import NocoDBClient
 from app.services.address_cache import get_address_cache
-from app.services.agent_loop import AgentLoop
+from app.services.agent_common import AgentLoop
 from app.services.departments_cache import DepartmentsCache
 from app.services.pii_parser import PiiParser
 from app.services.session_store import SessionStore

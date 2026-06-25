@@ -56,6 +56,31 @@ class ToolCall(BaseModel):
 
 
 # ============================================
+# Alert (уведомление администраторам)
+# ============================================
+
+AlertType = Literal[
+    "provider_switch",   # переключение на запасной провайдер (auth-сбой Yandex)
+    "nocodb_error",      # сбой NocoDB
+    "qdrant_error",      # сбой Qdrant
+]
+
+
+class Alert(BaseModel):
+    """
+    Служебное уведомление для администраторов.
+
+    Прикладывается к ответу, когда произошло событие, о котором должны знать
+    админы (например, Yandex отверг запрос по оплате/ключу и агент переключился
+    на GigaChat). Бот, получив непустой alert, рассылает его админам, а
+    пользователю отдаёт обычный ответ.
+    """
+
+    type: AlertType = Field(description="Тип события")
+    message: str = Field(description="Текст уведомления для администратора")
+
+
+# ============================================
 # Ответ
 # ============================================
 
@@ -74,6 +99,11 @@ class TextResponse(BaseModel):
         description="Какой внутренний tool агента сформировал ответ"
     )
     correlation_id: str
+    alert: Alert | None = Field(
+        default=None,
+        description="Служебное уведомление админам (если было событие). "
+        "Пользователю не показывается.",
+    )
 
 
 class ToolCallResponse(BaseModel):
@@ -85,6 +115,11 @@ class ToolCallResponse(BaseModel):
         description="Список действий для выполнения ботом",
     )
     correlation_id: str
+    alert: Alert | None = Field(
+        default=None,
+        description="Служебное уведомление админам (если было событие). "
+        "Пользователю не показывается.",
+    )
 
 # Type alias для ответа эндпоинта /api/ask
 AskResponse = TextResponse | ToolCallResponse

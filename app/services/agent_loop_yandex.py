@@ -38,7 +38,7 @@ from app.services.agent_common import (
     save_session,
     strip_service_prefix,
 )
-from app.services.agent_loop import AgentLoop  # переиспользуем тот же контейнер
+from app.services.agent_common import AgentLoop  # переиспользуем тот же контейнер
 from app.services.pii_parser import mask_for_logs
 from app.tools.registry import (
     get_all_tool_specs,
@@ -186,7 +186,7 @@ async def process_request_yandex(
             f"args (маскировано)={mask_args_for_logs(restored_args, found_names)}",
             extra={"correlation_id": correlation_id},
         )
-        asyncio.create_task(save_analytics(
+        await asyncio.create_task(save_analytics(
             nocodb_client=agent.nocodb_client,
             user_id=user_id,
             masked_question=masked_query,
@@ -230,7 +230,7 @@ async def process_request_yandex(
                 "[YA STEP 9] search_internal пусто — предлагаем форму HR",
                 extra={"correlation_id": correlation_id},
             )
-            asyncio.create_task(save_analytics(
+            await asyncio.create_task(save_analytics(
                 nocodb_client=agent.nocodb_client,
                 user_id=user_id,
                 masked_question=masked_query,
@@ -301,7 +301,7 @@ async def _pass2_general(
         masked_assistant_msg=masked_answer,
         correlation_id=correlation_id,
     )
-    asyncio.create_task(save_analytics(
+    await asyncio.create_task(save_analytics(
         nocodb_client=agent.nocodb_client,
         user_id=user_id,
         masked_question=masked_query,
@@ -359,7 +359,7 @@ async def _pass2_internal(
         masked_assistant_msg=masked_answer,
         correlation_id=correlation_id,
     )
-    asyncio.create_task(save_analytics(
+    await asyncio.create_task(save_analytics(
         nocodb_client=agent.nocodb_client,
         user_id=user_id,
         masked_question=masked_query,
