@@ -164,6 +164,34 @@ async def index_documents(
                 extra={"correlation_id": correlation_id},
             )
 
+    # Дифф: удаляем призраки — чанки документов, которых больше нет в NocoDB
+    # (удалённые или переименованные файлы → сменился URL = source_id).
+    try:
+        actual_ids = {doc.url for doc in documents}
+        existing_ids = await qdrant_store.get_all_source_ids(
+            source_types=["blank", "regulation", "support"],
+            correlation_id=correlation_id,
+        )
+        ghost_ids = existing_ids - actual_ids
+        for ghost in ghost_ids:
+            await qdrant_store.delete_by_source(ghost, correlation_id=correlation_id)
+            logger.info(
+                f"Удалён призрак (документа нет в NocoDB): {ghost}",
+                extra={"correlation_id": correlation_id},
+            )
+        if ghost_ids:
+            logger.info(
+                f"Documents диф: удалено призраков {len(ghost_ids)}",
+                extra={"correlation_id": correlation_id},
+            )
+    except Exception as exc:
+        # Сбой диффа не должен валить весь прогон — логируем и продолжаем.
+        logger.exception(
+            f"Documents диф: ошибка при удалении призраков: {exc}",
+            extra={"correlation_id": correlation_id},
+        )
+
+
     logger.info(
         f"Documents indexing complete: {stats}",
         extra={"correlation_id": correlation_id},

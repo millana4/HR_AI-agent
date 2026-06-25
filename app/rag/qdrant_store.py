@@ -296,6 +296,58 @@ class QdrantStore:
 
         return points[0].payload.get("indexed_at")
 
+    async def get_all_source_ids(
+            self,
+            source_types: list[SourceType],
+            correlation_id: str = "-",
+    ) -> set[str]:
+        """
+        Собрать все source_id, реально лежащие в Qdrant для указанных типов.
+
+        Используется индексатором для диффа: сравнить с актуальными source_id
+        из NocoDB и удалить исчезнувшие (призраки). Тянет только payload,
+        без векторов — дёшево. Пагинация через scroll.
+        """
+        client = self._get_client()
+        source_ids: set[str] = set()
+        next_offset = None
+
+        query_filter = qm.Filter(
+            must=[
+                qm.FieldCondition(
+                    key="source_type",
+                    match=qm.MatchAny(any=list(source_types)),
+                )
+            ]
+        )
+
+        try:
+            while True:
+                points, next_offset = await client.scroll(
+                    collection_name=self._collection,
+                    scroll_filter=query_filter,
+                    limit=256,
+                    offset=next_offset,
+                    with_payload=["source_id"],
+                    with_vectors=False,
+                )
+                for p in points:
+                    sid = p.payload.get("source_id")
+                    if sid:
+                        source_ids.add(sid)
+                if next_offset is None:
+                    break
+        except Exception as exc:
+            raise RepositoryError(
+                f"Qdrant get_all_source_ids failed: {exc}"
+            ) from exc
+
+        logger.debug(
+            f"Found {len(source_ids)} source_ids in Qdrant for types={source_types}",
+            extra={"correlation_id": correlation_id},
+        )
+        return source_ids
+
 
 def _make_point_id(source_id: str, chunk_index: int) -> str:
     """

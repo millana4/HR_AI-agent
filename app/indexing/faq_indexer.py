@@ -149,6 +149,32 @@ async def index_faq(
                 extra={"correlation_id": correlation_id},
             )
 
+    # Дифф: удаляем призраки — FAQ-чанки, которых больше нет в NocoDB
+    # (удалённые записи или снятый Active).
+    try:
+        actual_ids = {_make_faq_source_id(entry.id) for entry in entries}
+        existing_ids = await qdrant_store.get_all_source_ids(
+            source_types=["faq"],
+            correlation_id=correlation_id,
+        )
+        ghost_ids = existing_ids - actual_ids
+        for ghost in ghost_ids:
+            await qdrant_store.delete_by_source(ghost, correlation_id=correlation_id)
+            logger.info(
+                f"Удалён призрак (FAQ нет в NocoDB): {ghost}",
+                extra={"correlation_id": correlation_id},
+            )
+        if ghost_ids:
+            logger.info(
+                f"FAQ диф: удалено призраков {len(ghost_ids)}",
+                extra={"correlation_id": correlation_id},
+            )
+    except Exception as exc:
+        logger.exception(
+            f"FAQ диф: ошибка при удалении призраков: {exc}",
+            extra={"correlation_id": correlation_id},
+        )
+
     logger.info(
         f"FAQ indexing complete: {stats}",
         extra={"correlation_id": correlation_id},
