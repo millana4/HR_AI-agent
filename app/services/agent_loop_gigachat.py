@@ -12,6 +12,10 @@
     - bot_command (контакты/телефоны/магазины/аптеки/форма) → возврат боту.
 
 PII и хелперы — общие из agent_common.
+
+Аналитика моделей/токенов: эскалации (как у Yandex) здесь нет — Pass 1 это
+один вызов, одна модель. Для answer_general, пришедшего ТЕКСТОМ на Pass 1,
+Pass 2 отдельного нет, поэтому в аналитику Pass 2 дублирует Pass 1.
 """
 import asyncio
 
@@ -114,11 +118,19 @@ async def process_request_gigachat(
         extra={"correlation_id": correlation_id},
     )
 
+    # Pass 1 — модель и токены для аналитики (эскалации нет, одна модель).
+    pass1_model = llm_response.model or ""
+    pass1_tokens = llm_response.tokens
+
     # ШАГ 5. answer_general как ТЕКСТ: LLM ответила текстом без tool.
+    #        Pass 2 отдельного нет — ответ из того же вызова Pass 1,
+    #        поэтому в аналитике Pass 2 дублирует Pass 1.
     if llm_response.type == "text":
         return await _general_answer(
             agent, user_id, masked_query, found_names,
             strip_service_prefix(llm_response.content or ""),
+            pass1_model, pass1_tokens,
+            pass1_model, pass1_tokens,
             correlation_id,
         )
 
@@ -158,6 +170,8 @@ async def process_request_gigachat(
             masked_question=masked_query,
             masked_answer="",
             tool_used=tool_name,
+            llm_pass1=pass1_model,
+            tokens_pass1=pass1_tokens,
             correlation_id=correlation_id,
         ))
         return ToolCallResponse(
@@ -197,11 +211,21 @@ async def process_request_gigachat(
         return await _general_answer(
             agent, user_id, masked_query, found_names,
             strip_service_prefix(general_response.content or ""),
+            pass1_model, pass1_tokens,
+            general_response.model or "", general_response.tokens,
             correlation_id,
         )
 
     # ШАГ 9. search_internal — поиск в Qdrant, затем Pass 2.
     if is_agent_internal(tool_name):
+        # Подстраховка: если query пуст — берём сам запрос пользователя.
+        if not (tool_args or {}).get("query"):
+            tool_args = {**tool_args, "query": masked_query}
+            logger.debug(
+                f"[GC STEP 9] query пуст — берём запрос пользователя: {masked_query!r}",
+                extra={"correlation_id": correlation_id},
+            )
+
         context, hidden_data_list = await execute_internal_tool(
             tool_name=tool_name,
             args=tool_args,
@@ -225,6 +249,8 @@ async def process_request_gigachat(
                 masked_question=masked_query,
                 masked_answer="",
                 tool_used="suggest_hr_form",
+                llm_pass1=pass1_model,
+                tokens_pass1=pass1_tokens,
                 correlation_id=correlation_id,
             ))
             return ToolCallResponse(
@@ -281,6 +307,10 @@ async def process_request_gigachat(
             masked_question=masked_query,
             masked_answer=masked_answer,
             tool_used=tool_name,
+            llm_pass1=pass1_model,
+            tokens_pass1=pass1_tokens,
+            llm_pass2=pass2_response.model or "",
+            tokens_pass2=pass2_response.tokens,
             correlation_id=correlation_id,
         ))
         return TextResponse(
@@ -308,6 +338,10 @@ async def _general_answer(
     masked_query: str,
     found_names: list[str],
     masked_answer: str,
+    pass1_model: str,
+    pass1_tokens: int,
+    pass2_model: str,
+    pass2_tokens: int,
     correlation_id: str,
 ) -> AskResponse:
     """Финализировать общий ответ (answer_general): PII, сессия, аналитика."""
@@ -330,6 +364,10 @@ async def _general_answer(
         masked_question=masked_query,
         masked_answer=masked_answer,
         tool_used="answer_general",
+        llm_pass1=pass1_model,
+        tokens_pass1=pass1_tokens,
+        llm_pass2=pass2_model,
+        tokens_pass2=pass2_tokens,
         correlation_id=correlation_id,
     ))
     return TextResponse(
