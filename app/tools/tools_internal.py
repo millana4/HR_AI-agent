@@ -42,7 +42,7 @@ async def execute_internal_tool(
     qdrant_store: QdrantStore,
     embedder: Embedder,
     correlation_id: str = "-",
-) -> str:
+) -> tuple[str, list[str]]:
     """
     Выполнить search_internal и вернуть контекст в виде строки.
 
@@ -89,15 +89,36 @@ async def execute_internal_tool(
         )
         return NO_CONTEXT
 
+    # Полный лог найденных чанков — что реально лежит в Qdrant.
+    for idx, r in enumerate(results, start=1):
+        logger.debug(
+            f"[CHUNK {idx}] source={r.source_type} "
+            f"score={getattr(r, 'score', '?')} "
+            f"hidden_data={r.hidden_data!r}\n"
+            f"  text={r.text!r}",
+            extra={"correlation_id": correlation_id},
+        )
+
     # 3. Формируем смешанный контекст (FAQ + документы + wiki).
     context = _format_context(results)
 
     logger.debug(
-        f"search_internal: собран контекст из {len(results)} чанков, "
-        f"{len(context)} символов",
+        f"[CONTEXT целиком]\n{context}",
         extra={"correlation_id": correlation_id},
     )
-    return context
+
+    # Собираем Hidden_data со всех faq-чанков — для программной подстановки
+    # плейсхолдеров #ИМЯ после Pass 2 (значения нейронке не передаются).
+    hidden_data_list = [
+        r.hidden_data for r in results if r.hidden_data
+    ]
+
+    logger.debug(
+        f"search_internal: собран контекст из {len(results)} чанков, "
+        f"{len(context)} символов, hidden_data={len(hidden_data_list)} записей",
+        extra={"correlation_id": correlation_id},
+    )
+    return context, hidden_data_list
 
 
 def _format_context(results: list[SearchResult]) -> str:
@@ -113,8 +134,9 @@ def _format_context(results: list[SearchResult]) -> str:
     for i, r in enumerate(results, start=1):
         if r.source_type == "faq":
             parts = [r.text]
-            if r.hidden_data:
-                parts.append(f"Скрытые данные для подстановки: {r.hidden_data}")
+            # Hidden_data НЕ кладём в контекст: реальные значения (email и пр.)
+            # скрыты от нейронки. Плейсхолдеры #ИМЯ уже есть в r.text, а
+            # подстановка значений происходит программно после Pass 2.
             if r.link:
                 parts.append(f"Ссылка: {r.link}")
             if r.attachment:

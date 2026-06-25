@@ -3,7 +3,6 @@
 """
 import hashlib
 import re
-from datetime import date
 
 from app.core.config import Config
 
@@ -31,17 +30,17 @@ def mask_pii(text: str) -> str:
     return masked
 
 
-def generate_user_hash(user_id: int, target_date: date | None = None) -> str:
+def generate_user_hash(user_id: int) -> str:
     """
-    Генерирует хеш сессии для записи в аналитику.
+    Генерирует обезличенный хеш пользователя для записи в аналитику.
 
-    Хеш зависит от (user_id, date, salt). Один пользователь за один день — один хеш.
-    На следующий день у того же пользователя будет другой хеш.
+    Хеш зависит от (user_id, salt) и НЕ зависит от даты — поэтому один
+    пользователь всегда получает один и тот же хеш, в любой день. Это
+    позволяет отслеживать активность пользователя во времени, не раскрывая
+    его Telegram ID.
 
-    Восстановить user_id из хеша без знания соли невозможно.
+    Соль (SESSION_HASH_SALT) защищает от перебора: восстановить user_id из
+    хеша без знания соли невозможно.
     """
-    if target_date is None:
-        target_date = date.today()
-
-    raw = f"{user_id}:{target_date.isoformat()}:{Config.SESSION_HASH_SALT}"
+    raw = f"{user_id}:{Config.SESSION_HASH_SALT}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]

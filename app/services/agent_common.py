@@ -163,3 +163,53 @@ async def save_session(
         content=masked_assistant_msg,
         correlation_id=correlation_id,
     )
+
+
+def parse_hidden_data(hidden_data_list: list[str]) -> dict[str, str]:
+    """
+    Распарсить строки Hidden_data в словарь {ИМЯ_ПЕРЕМЕННОЙ: значение}.
+
+    Каждая строка имеет формат "ИМЯ=значение" (например
+    "АХО_КОНТАКТ=Bosova.V@mavis.ru"). Может содержать несколько пар через
+    перевод строки. Пустые/некорректные строки пропускаются.
+    """
+    result: dict[str, str] = {}
+    for raw in hidden_data_list:
+        if not raw:
+            continue
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or "=" not in line:
+                continue
+            name, _, value = line.partition("=")
+            name = name.strip()
+            value = value.strip()
+            if name and value:
+                result[name] = value
+    return result
+
+
+def substitute_hidden_data(text: str, hidden_map: dict[str, str]) -> str:
+    """
+    Подставить реальные значения вместо плейсхолдеров с решёткой.
+
+    В тексте плейсхолдеры размечены решёткой: #АХО_КОНТАКТ. Заменяем
+    #ИМЯ → значение из hidden_map. Обычные слова заглавными буквами без
+    решётки (ГПХ, НДФЛ) не трогаются.
+
+    Если плейсхолдер с решёткой остался без значения в hidden_map — убираем
+    решётку (показываем имя без #), чтобы пользователь не видел «#АХО_КОНТАКТ».
+    """
+    if not text:
+        return text
+
+    # Сначала подставляем известные плейсхолдеры (с решёткой).
+    for name, value in hidden_map.items():
+        text = text.replace(f"#{name}", value)
+
+    # Подчищаем «осиротевшие» плейсхолдеры: #СЛОВО без значения → СЛОВО.
+    # Решётка + заглавные буквы/цифры/подчёркивание.
+    import re
+    text = re.sub(r"#([А-ЯЁA-Z][А-ЯЁA-Z0-9_]*)", r"\1", text)
+
+    return text

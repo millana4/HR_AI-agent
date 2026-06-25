@@ -39,10 +39,12 @@ from app.repositories.analytics import save_analytics
 from app.services.agent_common import (
     mask_args_for_logs,
     mask_text_for_logs,
+    parse_hidden_data,
     restore_pii,
     restore_pii_in_args,
     save_session,
     strip_service_prefix,
+    substitute_hidden_data,
 )
 from app.services.agent_common import AgentLoop  # переиспользуем тот же контейнер
 from app.services.pii_parser import mask_for_logs
@@ -257,7 +259,7 @@ async def process_request_yandex(
 
     # ШАГ 10. search_internal — векторный поиск, затем Pass 2 с контекстом.
     if is_agent_internal(tool_name):
-        context = await execute_internal_tool(
+        context, hidden_data_list = await execute_internal_tool(
             tool_name=tool_name,
             args=tool_args,
             qdrant_store=agent.qdrant_store,
@@ -265,7 +267,8 @@ async def process_request_yandex(
             correlation_id=correlation_id,
         )
         logger.debug(
-            f"[YA STEP 9] search_internal вернул контекст ({len(context)} симв.)",
+            f"[YA STEP 9] search_internal вернул контекст ({len(context)} симв.), "
+            f"hidden_data={len(hidden_data_list)} записей",
             extra={"correlation_id": correlation_id},
         )
 
@@ -290,7 +293,8 @@ async def process_request_yandex(
 
         return await _pass2_internal(
             agent, user_id, masked_query, found_names,
-            history_messages, tool_name, context, correlation_id,
+            history_messages, tool_name, context, hidden_data_list,
+            correlation_id,
         )
 
     # ШАГ 11. Неизвестный tool — защита.
@@ -369,6 +373,7 @@ async def _pass2_internal(
     history_messages: list[Message],
     tool_name: str,
     context: str,
+    hidden_data_list: list[str],
     correlation_id: str,
 ) -> AskResponse:
     """Pass 2 для search_internal: deepseek формирует ответ по контексту из Qdrant."""
@@ -391,7 +396,19 @@ async def _pass2_internal(
     masked_answer = strip_service_prefix(
         pass2_response.content or ""
     ) or "Не удалось сформировать ответ."
-    final_answer = restore_pii(masked_answer, found_names)
+
+    # В Redis и аналитику пишем masked_answer с плейсхолдерами #ИМЯ
+    # (реальные значения — ПД — туда не попадают).
+    # Подстановку делаем только в финальном тексте для пользователя.
+    hidden_map = parse_hidden_data(hidden_data_list)
+    final_answer = masked_answer
+    if hidden_map:
+        final_answer = substitute_hidden_data(final_answer, hidden_map)
+        logger.debug(
+            f"[YA STEP 12] Подстановка hidden_data: {list(hidden_map.keys())}",
+            extra={"correlation_id": correlation_id},
+        )
+    final_answer = restore_pii(final_answer, found_names)
     logger.debug(
         f"[YA STEP 12] Pass 2 (internal) ← deepseek. "
         f"answer (маскировано)={mask_text_for_logs(final_answer, found_names)!r}",
