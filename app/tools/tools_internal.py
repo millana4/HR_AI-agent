@@ -56,7 +56,7 @@ async def execute_internal_tool(
             f"Unknown internal tool: {tool_name}",
             extra={"correlation_id": correlation_id},
         )
-        return NO_CONTEXT
+        return NO_CONTEXT, []
 
     query = (args or {}).get("query", "").strip()
     if not query:
@@ -64,7 +64,7 @@ async def execute_internal_tool(
             "search_internal called with empty query",
             extra={"correlation_id": correlation_id},
         )
-        return NO_CONTEXT
+        return NO_CONTEXT, []
 
     logger.debug(
         f"search_internal: query={query!r}, source_types={_INTERNAL_SOURCES}",
@@ -87,7 +87,7 @@ async def execute_internal_tool(
             f"search_internal: ничего не найдено по запросу {query!r}",
             extra={"correlation_id": correlation_id},
         )
-        return NO_CONTEXT
+        return NO_CONTEXT, []
 
     # Полный лог найденных чанков — что реально лежит в Qdrant.
     for idx, r in enumerate(results, start=1):
@@ -101,11 +101,6 @@ async def execute_internal_tool(
 
     # 3. Формируем смешанный контекст (FAQ + документы + wiki).
     context = _format_context(results)
-
-    logger.debug(
-        f"[CONTEXT целиком]\n{context}",
-        extra={"correlation_id": correlation_id},
-    )
 
     # Собираем Hidden_data со всех faq-чанков — для программной подстановки
     # плейсхолдеров #ИМЯ после Pass 2 (значения нейронке не передаются).

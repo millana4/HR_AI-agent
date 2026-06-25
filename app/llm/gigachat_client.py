@@ -205,9 +205,9 @@ class GigaChatClient(BaseLLMClient):
         return False
 
     def _parse_response(
-        self,
-        body: dict[str, Any],
-        correlation_id: str,
+            self,
+            body: dict[str, Any],
+            correlation_id: str,
     ) -> LLMResponse:
         """Распарсить ответ GigaChat в наш LLMResponse."""
         try:
@@ -215,6 +215,10 @@ class GigaChatClient(BaseLLMClient):
             message = choice["message"]
         except (KeyError, IndexError) as exc:
             raise LLMError(f"Unexpected GigaChat response structure: {exc}") from exc
+
+        # Модель и токены для аналитики. tokens = total_tokens (вход + выход).
+        model_name = body.get("model") or None
+        tokens = (body.get("usage") or {}).get("total_tokens", 0) or 0
 
         # Function call (LLM вызывает tool)
         function_call = message.get("function_call")
@@ -237,6 +241,7 @@ class GigaChatClient(BaseLLMClient):
             return LLMResponse(
                 type="tool_calls",
                 tool_calls=[ToolCall(name=name, args=args)],
+                model=model_name, tokens=tokens,
             )
 
         # Текстовый ответ
@@ -245,4 +250,7 @@ class GigaChatClient(BaseLLMClient):
             f"GigaChat text response: {len(content)} chars",
             extra={"correlation_id": correlation_id},
         )
-        return LLMResponse(type="text", content=content)
+        return LLMResponse(
+            type="text", content=content,
+            model=model_name, tokens=tokens,
+        )

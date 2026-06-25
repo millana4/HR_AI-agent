@@ -126,6 +126,14 @@ async def process_request_yandex(
         extra={"correlation_id": correlation_id},
     )
 
+    # Аккумуляторы Pass 1 для аналитики (модель + токены; при эскалации
+    # добавится вторая модель и её токены просуммируются).
+    pass1_models: list[str] = []
+    pass1_tokens = 0
+    if llm_response.model:
+        pass1_models.append(llm_response.model)
+    pass1_tokens += llm_response.tokens
+
     # ШАГ 5. Lite вернула текст вместо tool-call — сбой классификации.
     #        Эскалируем: повторяем Pass 1 на более сильной модели (PASS2 = deepseek).
     if llm_response.type == "text" or not llm_response.tool_calls:
@@ -146,6 +154,10 @@ async def process_request_yandex(
             f"tool_calls={[(tc.name, tc.args) for tc in llm_response.tool_calls]}",
             extra={"correlation_id": correlation_id},
         )
+        if llm_response.model:
+            pass1_models.append(llm_response.model)
+        pass1_tokens += llm_response.tokens
+
         # Если и сильная модель не классифицировала — трактуем как общий вопрос.
         if llm_response.type == "text" or not llm_response.tool_calls:
             logger.warning(
@@ -154,7 +166,7 @@ async def process_request_yandex(
             )
             return await _pass2_general(
                 agent, user_id, masked_query, found_names,
-                history_messages, correlation_id,
+                history_messages, pass1_models, pass1_tokens, correlation_id,
             )
 
     # ШАГ 6. Берём первый tool-call (множественные — отдельный шаг плана).
@@ -165,6 +177,8 @@ async def process_request_yandex(
         f"[YA STEP 6] Pass 1 выбрал tool: {tool_name}",
         extra={"correlation_id": correlation_id},
     )
+    # Строка моделей Pass 1 для аналитики ("lite" или "lite + deepseek").
+    pass1_llm_str = " + ".join(pass1_models)
 
     # ШАГ 7. bot_command (контакты, телефоны, магазины, аптеки, форма HR).
     #        Возвращаем боту команду. ПД восстанавливаем в args.
@@ -201,6 +215,8 @@ async def process_request_yandex(
             masked_question=masked_query,
             masked_answer="",
             tool_used=tool_name,
+            llm_pass1=pass1_llm_str,
+            tokens_pass1=pass1_tokens,
             correlation_id=correlation_id,
         ))
         return ToolCallResponse(
@@ -208,15 +224,15 @@ async def process_request_yandex(
             correlation_id=correlation_id,
         )
 
-    # ШАГ 8. generate_image — генерация картинки через Alice AI ART.
+    # ШАГ 7a. generate_image — генерация картинки через Alice AI ART.
     if is_agent_image(tool_name):
         logger.info(
-            "[YA STEP 7b] generate_image → Alice AI ART",
+            "[YA STEP 7a] generate_image → Alice AI ART",
             extra={"correlation_id": correlation_id},
         )
         if agent.art_client is None:
             logger.warning(
-                "[YA STEP 7b] art_client недоступен — заглушка",
+                "[YA STEP 7a] art_client недоступен — заглушка",
                 extra={"correlation_id": correlation_id},
             )
             return TextResponse(
@@ -238,6 +254,8 @@ async def process_request_yandex(
             masked_question=masked_query,
             masked_answer="[image]",
             tool_used="generate_image",
+            llm_pass1=pass1_llm_str,
+            tokens_pass1=pass1_tokens,
             correlation_id=correlation_id,
         ))
         return ImageResponse(
@@ -246,7 +264,7 @@ async def process_request_yandex(
             correlation_id=correlation_id,
         )
 
-    # ШАГ 9. answer_general — общий вопрос. Pass 2 на deepseek БЕЗ Qdrant.
+    # ШАГ 8. answer_general — общий вопрос. Pass 2 на deepseek БЕЗ Qdrant.
     if is_agent_general(tool_name):
         logger.info(
             "[YA STEP 8] answer_general → Pass 2 deepseek (без векторного поиска)",
@@ -254,11 +272,19 @@ async def process_request_yandex(
         )
         return await _pass2_general(
             agent, user_id, masked_query, found_names,
-            history_messages, correlation_id,
+            history_messages, pass1_models, pass1_tokens, correlation_id,
         )
 
-    # ШАГ 10. search_internal — векторный поиск, затем Pass 2 с контекстом.
+    # ШАГ 9. search_internal — векторный поиск, затем Pass 2 с контекстом.
     if is_agent_internal(tool_name):
+        # Подстраховка: lite иногда возвращает search_internal без query
+        # (только имя tool). Берём сам запрос пользователя как поисковый.
+        if not (tool_args or {}).get("query"):
+            tool_args = {**tool_args, "query": masked_query}
+            logger.debug(
+                f"[YA STEP 9] query пуст — берём запрос пользователя: {masked_query!r}",
+                extra={"correlation_id": correlation_id},
+            )
         context, hidden_data_list = await execute_internal_tool(
             tool_name=tool_name,
             args=tool_args,
@@ -284,6 +310,8 @@ async def process_request_yandex(
                 masked_question=masked_query,
                 masked_answer="",
                 tool_used="suggest_hr_form",
+                llm_pass1=pass1_llm_str,
+                tokens_pass1=pass1_tokens,
                 correlation_id=correlation_id,
             ))
             return ToolCallResponse(
@@ -294,10 +322,10 @@ async def process_request_yandex(
         return await _pass2_internal(
             agent, user_id, masked_query, found_names,
             history_messages, tool_name, context, hidden_data_list,
-            correlation_id,
+            pass1_models, pass1_tokens, correlation_id,
         )
 
-    # ШАГ 11. Неизвестный tool — защита.
+    # ШАГ 10. Неизвестный tool — защита.
     logger.warning(
         f"[YA STEP 10] Неизвестный tool: {tool_name} — fallback",
         extra={"correlation_id": correlation_id},
@@ -316,6 +344,8 @@ async def _pass2_general(
     masked_query: str,
     found_names: list[str],
     history_messages: list[Message],
+    pass1_models: list[str],
+    pass1_tokens: int,
     correlation_id: str,
 ) -> AskResponse:
     """Pass 2 для answer_general: deepseek отвечает из общих знаний, без Qdrant."""
@@ -356,6 +386,10 @@ async def _pass2_general(
         masked_question=masked_query,
         masked_answer=masked_answer,
         tool_used="answer_general",
+        llm_pass1=" + ".join(pass1_models),
+        tokens_pass1=pass1_tokens,
+        llm_pass2=pass2_response.model or "",
+        tokens_pass2=pass2_response.tokens,
         correlation_id=correlation_id,
     ))
     return TextResponse(
@@ -374,6 +408,8 @@ async def _pass2_internal(
     tool_name: str,
     context: str,
     hidden_data_list: list[str],
+    pass1_models: list[str],
+    pass1_tokens: int,
     correlation_id: str,
 ) -> AskResponse:
     """Pass 2 для search_internal: deepseek формирует ответ по контексту из Qdrant."""
@@ -427,6 +463,10 @@ async def _pass2_internal(
         masked_question=masked_query,
         masked_answer=masked_answer,
         tool_used=tool_name,
+        llm_pass1=" + ".join(pass1_models),
+        tokens_pass1=pass1_tokens,
+        llm_pass2=pass2_response.model or "",
+        tokens_pass2=pass2_response.tokens,
         correlation_id=correlation_id,
     ))
     return TextResponse(

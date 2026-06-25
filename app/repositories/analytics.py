@@ -33,6 +33,10 @@ async def save_analytics(
     masked_question: str,
     masked_answer: str,
     tool_used: str,
+    llm_pass1: str = "",
+    tokens_pass1: int = 0,
+    llm_pass2: str = "",
+    tokens_pass2: int = 0,
     correlation_id: str = "-",
 ) -> None:
     """
@@ -58,6 +62,7 @@ async def save_analytics(
         return
 
     now = datetime.now(_MSK)
+    now = datetime.now(_MSK)
     record = {
         "User_hash": generate_user_hash(user_id),
         "Question": masked_question,
@@ -65,6 +70,12 @@ async def save_analytics(
         "Time": now.strftime("%H:%M:%S"),
         "Tool_used": tool_used,
         "Answer": masked_answer,
+        # Модели и токены по проходам (поля в NocoDB — с пробелами).
+        # Токены пишем строкой (поле текстовое). Пустые/нулевые — пустая строка.
+        "LLM Pass 1": llm_pass1,
+        "Tokens Pass 1": str(tokens_pass1) if tokens_pass1 else "",
+        "LLM Pass 2": llm_pass2,
+        "Tokens Pass 2": str(tokens_pass2) if tokens_pass2 else "",
     }
 
     try:

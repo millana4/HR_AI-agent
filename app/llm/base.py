@@ -53,11 +53,16 @@ class LLMResponse:
     Один из двух типов:
     - text: LLM ответила текстом, без вызова tool
     - tool_calls: LLM хочет вызвать один или несколько tools
+
+    Поля model/tokens — для аналитики (какая модель и сколько токенов
+    израсходовано на этот вызов). tokens — total_tokens (вход + выход).
     """
 
     type: Literal["text", "tool_calls"]
     content: str = ""  # заполнено для type="text"
     tool_calls: list[ToolCall] = field(default_factory=list)  # для type="tool_calls"
+    model: str | None = None  # имя модели, давшей ответ (из usage ответа API)
+    tokens: int = 0  # total_tokens за этот вызов (для биллинга/аналитики)
 
 
 class BaseLLMClient(ABC):

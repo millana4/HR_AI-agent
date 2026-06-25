@@ -147,9 +147,9 @@ class YandexClient(BaseLLMClient):
         return body
 
     def _parse_response(
-        self,
-        body: dict[str, Any],
-        correlation_id: str,
+            self,
+            body: dict[str, Any],
+            correlation_id: str,
     ) -> LLMResponse:
         """Распарсить ответ Yandex (OpenAI-формат) в наш LLMResponse."""
         logger.debug(
@@ -161,6 +161,19 @@ class YandexClient(BaseLLMClient):
             message = choice["message"]
         except (KeyError, IndexError) as exc:
             raise LLMError(f"Unexpected Yandex response structure: {exc}") from exc
+
+        # Модель и токены для аналитики. model приходит как gpt://folder/имя —
+        # оставляем только короткое имя. tokens = total_tokens (вход + выход).
+        raw_model = body.get("model", "") or ""
+        # Имя модели: gpt://folder/yandexgpt-5-lite → yandexgpt-5-lite,
+        # gpt://deepseek-v4-flash/latest → deepseek-v4-flash (берём не 'latest').
+        model_name = None
+        if raw_model:
+            parts = [p for p in raw_model.split("/") if p and p not in ("gpt:", "")]
+            # Отбрасываем folder_id (длинный буквенно-цифровой) и хвост latest.
+            cleaned = [p for p in parts if p != "latest" and not p.startswith("b1g")]
+            model_name = cleaned[-1] if cleaned else raw_model
+        tokens = (body.get("usage") or {}).get("total_tokens", 0) or 0
 
         # Tool calls (современный формат: message.tool_calls — список)
         tool_calls_raw = message.get("tool_calls")
@@ -184,7 +197,10 @@ class YandexClient(BaseLLMClient):
                 f"Yandex tool calls: {[tc.name for tc in tool_calls]}",
                 extra={"correlation_id": correlation_id},
             )
-            return LLMResponse(type="tool_calls", tool_calls=tool_calls)
+            return LLMResponse(
+                type="tool_calls", tool_calls=tool_calls,
+                model=model_name, tokens=tokens,
+            )
 
         # Текстовый ответ.
         content = message.get("content", "") or ""
@@ -199,13 +215,19 @@ class YandexClient(BaseLLMClient):
                 f"Yandex tool call (восстановлен из текста): {salvaged.name}",
                 extra={"correlation_id": correlation_id},
             )
-            return LLMResponse(type="tool_calls", tool_calls=[salvaged])
+            return LLMResponse(
+                type="tool_calls", tool_calls=[salvaged],
+                model=model_name, tokens=tokens,
+            )
 
         logger.info(
             f"Yandex text response: {len(content)} chars",
             extra={"correlation_id": correlation_id},
         )
-        return LLMResponse(type="text", content=content)
+        return LLMResponse(
+            type="text", content=content,
+            model=model_name, tokens=tokens,
+        )
 
 
     def _salvage_tool_from_text(self, content: str) -> ToolCall | None:
