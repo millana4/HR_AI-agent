@@ -62,7 +62,7 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
     Эндпоинты в EXEMPT_PATHS пропускаются без проверки.
     """
 
-    EXEMPT_PATHS = {"/api/health", "/docs", "/redoc", "/openapi.json"}
+    EXEMPT_PATHS = {"/api/v1/health", "/docs", "/redoc", "/openapi.json"}
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path in self.EXEMPT_PATHS:

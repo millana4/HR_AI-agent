@@ -1,8 +1,10 @@
 """
-Интеграционные тесты эндпоинта /api/health.
+Интеграционные тесты эндпоинта /api/v1/health.
 
 Health должен работать без авторизации и возвращать correlation_id
 в заголовке через CorrelationIdMiddleware.
+
+ПУТИ: эндпоинты переехали на /api/v1 (legacy /api убран).
 """
 import pytest
 from fastapi.testclient import TestClient
@@ -21,12 +23,12 @@ def client():
 
 def test_health_without_api_key_returns_200(client: TestClient):
     """Health должен работать без авторизации."""
-    response = client.get("/api/health")
+    response = client.get("/api/v1/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "version": "1.0.0"}
 
 
 def test_health_returns_correlation_id_header(client: TestClient):
-    response = client.get("/api/health")
+    response = client.get("/api/v1/health")
     assert "x-correlation-id" in response.headers
     assert len(response.headers["x-correlation-id"]) == 16

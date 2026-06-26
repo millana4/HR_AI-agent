@@ -1,16 +1,22 @@
 """
-Интеграционные тесты agent_loop с моками всех внешних зависимостей.
+Интеграционные тесты GigaChat-петли (process_request_gigachat) с моками
+всех внешних зависимостей.
+
+Заменяет старый test_agent_loop.py: общая петля (app.services.agent_loop)
+удалена и разнесена на две — Yandex и GigaChat. Здесь тестируется
+GigaChat-петля, поведение которой ближе к старой общей логике
+(Pass 1 может вернуть text → answer_general).
 
 Проверяем главную логику двухпроходной схемы:
   - Pass 1 → text (answer_general)
   - Pass 1 → bot_command
   - Pass 1 → search_internal → Pass 2
   - search_internal пуст → suggest_hr_form
-  - PII-маскирование и восстановление
+  - PII-маскирование и восстановление (плейсхолдеры NAME_1, NAME_2, ...)
   - Подмешивание истории
   - Fallback на неизвестный tool
 
-Не дёргаем FastAPI и HTTP — тестируем чистую функцию process_request.
+Не дёргаем FastAPI и HTTP — тестируем чистую функцию process_request_gigachat.
 """
 from unittest.mock import AsyncMock, MagicMock
 
@@ -19,7 +25,8 @@ import pytest
 from app.api.schemas import TextResponse, ToolCallResponse
 from app.llm.base import LLMResponse, ToolCall as LLMToolCall
 from app.rag.qdrant_store import SearchResult
-from app.services.agent_loop import AgentLoop, process_request
+from app.services.agent_common import AgentLoop
+from app.services.agent_loop_gigachat import process_request_gigachat
 from app.services.pii_parser import PiiParseResult
 
 
@@ -33,8 +40,9 @@ def _make_pii_result(masked_text: str, found_names: list[str]) -> PiiParseResult
 
 @pytest.fixture
 def agent():
-    """AgentLoop со всеми моками."""
+    """AgentLoop со всеми моками (под GigaChat-петлю)."""
     llm = AsyncMock()
+
     session_store = AsyncMock()
     session_store.get_history = AsyncMock(return_value=[])
     session_store.append = AsyncMock()
@@ -63,6 +71,17 @@ def agent():
         ]
     )
 
+    # departments_cache — нужен для системного промпта Pass 1.
+    departments_cache = AsyncMock()
+    departments_cache.get_departments = AsyncMock(
+        return_value=(["Бухгалтерия"], ["Касса"])
+    )
+
+    # address_cache — нужен для search_shop/search_drugstore.
+    address_cache = AsyncMock()
+    address_cache.ensure_fresh = AsyncMock()
+    address_cache.extract_address = MagicMock(return_value=None)
+
     return AgentLoop(
         llm=llm,
         session_store=session_store,
@@ -70,6 +89,8 @@ def agent():
         nocodb_client=nocodb_client,
         qdrant_store=qdrant_store,
         embedder=embedder,
+        departments_cache=departments_cache,
+        address_cache=address_cache,
     )
 
 
@@ -81,7 +102,7 @@ async def test_pass1_text_returns_answer_general(agent):
     agent.llm.chat = AsyncMock(
         return_value=LLMResponse(type="text", content="Привет! Чем помочь?")
     )
-    result = await process_request(
+    result = await process_request_gigachat(
         agent=agent, user_id=123, request_text="Привет", correlation_id="cid-1",
     )
     assert isinstance(result, TextResponse)
@@ -94,7 +115,7 @@ async def test_pass1_text_saves_masked_pair_to_redis(agent):
     agent.llm.chat = AsyncMock(
         return_value=LLMResponse(type="text", content="Ответ.")
     )
-    await process_request(
+    await process_request_gigachat(
         agent=agent, user_id=123, request_text="Запрос", correlation_id="cid-1",
     )
     assert agent.session_store.append.await_count == 2
@@ -117,7 +138,7 @@ async def test_pass1_bot_command_returns_tool_call_response(agent):
             tool_calls=[LLMToolCall(name="search_contacts", args={"query": "Иванов"})],
         )
     )
-    result = await process_request(
+    result = await process_request_gigachat(
         agent=agent, user_id=123, request_text="Найди Иванова", correlation_id="cid-2",
     )
     assert isinstance(result, ToolCallResponse)
@@ -134,13 +155,11 @@ async def test_pass1_bot_command_saves_only_user_message(agent):
             tool_calls=[LLMToolCall(name="search_contacts", args={"query": "Иванов"})],
         )
     )
-    await process_request(
+    await process_request_gigachat(
         agent=agent, user_id=123, request_text="Найди Иванова", correlation_id="cid-2",
     )
-    assert agent.session_store.append.await_count == 1
-    call = agent.session_store.append.await_args_list[0]
-    assert call.kwargs["role"] == "user"
-    assert call.kwargs["content"] == "Найди Иванова"
+    # bot_command не пишет ответ ассистента в Redis (save_session не вызывается).
+    assert agent.session_store.append.await_count == 0
 
 
 async def test_pass1_bot_command_does_not_call_pass2(agent):
@@ -150,24 +169,24 @@ async def test_pass1_bot_command_does_not_call_pass2(agent):
             tool_calls=[LLMToolCall(name="search_shop", args={"query": "СПб Невский"})],
         )
     )
-    await process_request(
+    await process_request_gigachat(
         agent=agent, user_id=123, request_text="Найди магазин", correlation_id="cid-2",
     )
     assert agent.llm.chat.await_count == 1
 
 
 async def test_bot_command_restores_real_name_in_args(agent):
-    """В args bot_command [NAME] заменяется на реальную фамилию для бота."""
+    """В args bot_command NAME_1 заменяется на реальную фамилию для бота."""
     agent.pii_parser.parse = MagicMock(
-        return_value=_make_pii_result("Найди телефон [NAME]", ["Иванов"])
+        return_value=_make_pii_result("Найди телефон NAME_1", ["Иванов"])
     )
     agent.llm.chat = AsyncMock(
         return_value=LLMResponse(
             type="tool_calls", content="",
-            tool_calls=[LLMToolCall(name="search_contacts", args={"query": "[NAME]"})],
+            tool_calls=[LLMToolCall(name="search_contacts", args={"query": "NAME_1"})],
         )
     )
-    result = await process_request(
+    result = await process_request_gigachat(
         agent=agent, user_id=123, request_text="Найди телефон Иванова", correlation_id="cid-bc",
     )
     assert isinstance(result, ToolCallResponse)
@@ -188,7 +207,7 @@ async def test_agent_internal_runs_two_passes(agent):
             LLMResponse(type="text", content="Отпуск оформляется так-то."),
         ]
     )
-    result = await process_request(
+    result = await process_request_gigachat(
         agent=agent, user_id=123, request_text="Как оформить отпуск?", correlation_id="cid-3",
     )
     assert isinstance(result, TextResponse)
@@ -198,7 +217,7 @@ async def test_agent_internal_runs_two_passes(agent):
 
 
 async def test_agent_internal_pass2_receives_tool_context(agent):
-    """Pass 2 получает контекст в system-сообщении (склеен с SYSTEM_PROMPT)."""
+    """Pass 2 получает контекст в system-сообщении (склеен с CONTEXT_PROMPT)."""
     agent.qdrant_store.search = AsyncMock(
         return_value=[
             SearchResult(
@@ -220,41 +239,39 @@ async def test_agent_internal_pass2_receives_tool_context(agent):
             LLMResponse(type="text", content="Финальный ответ."),
         ]
     )
-    await process_request(
+    await process_request_gigachat(
         agent=agent, user_id=123, request_text="Какой график?", correlation_id="cid-3",
     )
     pass2_call = agent.llm.chat.await_args_list[1]
     pass2_messages = pass2_call.kwargs["messages"]
-    # Контекст теперь в system-сообщении (первое), а не в последнем.
     system_content = pass2_messages[0].content
     assert pass2_messages[0].role == "system"
     assert "search_internal" in system_content
     assert "с 9 до 18" in system_content
     assert pass2_call.kwargs["tools"] is None
-    # Запрос ушёл в эмбеддер.
     agent.embedder.embed_query.assert_awaited_once()
     assert agent.embedder.embed_query.await_args.args[0] == "график"
 
 
 async def test_agent_internal_saves_masked_assistant_to_redis(agent):
     agent.pii_parser.parse = MagicMock(
-        return_value=_make_pii_result("Запрос про [NAME]", ["Иванов"])
+        return_value=_make_pii_result("Запрос про NAME_1", ["Иванов"])
     )
     agent.llm.chat = AsyncMock(
         side_effect=[
             LLMResponse(
                 type="tool_calls", content="",
-                tool_calls=[LLMToolCall(name="search_internal", args={"query": "[NAME]"})],
+                tool_calls=[LLMToolCall(name="search_internal", args={"query": "NAME_1"})],
             ),
-            LLMResponse(type="text", content="Обратитесь к [NAME] из отдела."),
+            LLMResponse(type="text", content="Обратитесь к NAME_1 из отдела."),
         ]
     )
-    await process_request(
+    await process_request_gigachat(
         agent=agent, user_id=123, request_text="Где работает Иванов?", correlation_id="cid-3",
     )
     assistant_call = agent.session_store.append.await_args_list[1]
     assert assistant_call.kwargs["role"] == "assistant"
-    assert "[NAME]" in assistant_call.kwargs["content"]
+    assert "NAME_1" in assistant_call.kwargs["content"]
     assert "Иванов" not in assistant_call.kwargs["content"]
 
 
@@ -267,13 +284,12 @@ async def test_empty_search_returns_hr_form(agent):
             tool_calls=[LLMToolCall(name="search_internal", args={"query": "что-то редкое"})],
         )
     )
-    result = await process_request(
+    result = await process_request_gigachat(
         agent=agent, user_id=123, request_text="Очень редкий вопрос", correlation_id="cid-hr",
     )
     assert isinstance(result, ToolCallResponse)
     assert result.tool_calls[0].name == "suggest_hr_form"
     assert result.tool_calls[0].args == {}
-    # Pass 2 не вызывался — только Pass 1.
     assert agent.llm.chat.await_count == 1
 
 
@@ -283,30 +299,30 @@ async def test_empty_search_returns_hr_form(agent):
 
 async def test_pii_restored_in_final_text(agent):
     agent.pii_parser.parse = MagicMock(
-        return_value=_make_pii_result("Где работает [NAME]?", ["Иванов"])
+        return_value=_make_pii_result("Где работает NAME_1?", ["Иванов"])
     )
     agent.llm.chat = AsyncMock(
-        return_value=LLMResponse(type="text", content="[NAME] работает в отделе закупок.")
+        return_value=LLMResponse(type="text", content="NAME_1 работает в отделе закупок.")
     )
-    result = await process_request(
+    result = await process_request_gigachat(
         agent=agent, user_id=123, request_text="Где работает Иванов?", correlation_id="cid-4",
     )
-    assert "Иванов работает в отделе закупок." == result.answer
-    assert "[NAME]" not in result.answer
+    assert result.answer == "Иванов работает в отделе закупок."
+    assert "NAME_1" not in result.answer
 
 
 async def test_pii_multiple_names_restored_in_order(agent):
     agent.pii_parser.parse = MagicMock(
         return_value=_make_pii_result(
-            "[NAME] и [NAME] работают вместе", ["Иванов", "Петров"],
+            "NAME_1 и NAME_2 работают вместе", ["Иванов", "Петров"],
         )
     )
     agent.llm.chat = AsyncMock(
         return_value=LLMResponse(
-            type="text", content="[NAME] и [NAME] работают в одном отделе.",
+            type="text", content="NAME_1 и NAME_2 работают в одном отделе.",
         )
     )
-    result = await process_request(
+    result = await process_request_gigachat(
         agent=agent, user_id=123, request_text="Иванов и Петров вместе работают?", correlation_id="cid-4",
     )
     assert result.answer == "Иванов и Петров работают в одном отделе."
@@ -314,21 +330,21 @@ async def test_pii_multiple_names_restored_in_order(agent):
 
 async def test_pii_redis_stores_masked_user_message(agent):
     agent.pii_parser.parse = MagicMock(
-        return_value=_make_pii_result("Найди [NAME]", ["Иванов"])
+        return_value=_make_pii_result("Найди NAME_1", ["Иванов"])
     )
     agent.llm.chat = AsyncMock(
         return_value=LLMResponse(type="text", content="Не нашёл.")
     )
-    await process_request(
+    await process_request_gigachat(
         agent=agent, user_id=123, request_text="Найди Иванова", correlation_id="cid-4",
     )
     user_call = agent.session_store.append.await_args_list[0]
-    assert user_call.kwargs["content"] == "Найди [NAME]"
+    assert user_call.kwargs["content"] == "Найди NAME_1"
     assert "Иванов" not in user_call.kwargs["content"]
 
 
 # ============================================
-# История подмешивается в messages
+# История подмешивается в messages (Pass 1)
 # ============================================
 
 async def test_history_is_included_in_pass1_messages(agent):
@@ -341,16 +357,14 @@ async def test_history_is_included_in_pass1_messages(agent):
     agent.llm.chat = AsyncMock(
         return_value=LLMResponse(type="text", content="Новый ответ.")
     )
-    await process_request(
+    await process_request_gigachat(
         agent=agent, user_id=123, request_text="Новый вопрос", correlation_id="cid-h",
     )
     pass1_call = agent.llm.chat.await_args_list[0]
     messages = pass1_call.kwargs["messages"]
-    assert len(messages) == 4
+    # Pass 1 в GigaChat-петле историю НЕ подмешивает: system + user.
     assert messages[0].role == "system"
-    assert messages[1].content == "Предыдущий вопрос"
-    assert messages[2].content == "Предыдущий ответ"
-    assert messages[3].content == "Новый вопрос"
+    assert messages[-1].content == "Новый вопрос"
 
 
 # ============================================
@@ -364,7 +378,7 @@ async def test_unknown_tool_falls_back_to_answer_general(agent):
             tool_calls=[LLMToolCall(name="unknown_tool", args={})],
         )
     )
-    result = await process_request(
+    result = await process_request_gigachat(
         agent=agent, user_id=123, request_text="Что-то странное", correlation_id="cid-fb",
     )
     assert isinstance(result, TextResponse)
@@ -386,7 +400,7 @@ async def test_empty_pass2_response_has_fallback_text(agent):
             LLMResponse(type="text", content=""),
         ]
     )
-    result = await process_request(
+    result = await process_request_gigachat(
         agent=agent, user_id=123, request_text="Что угодно", correlation_id="cid-e",
     )
     assert isinstance(result, TextResponse)

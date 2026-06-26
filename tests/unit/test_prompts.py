@@ -1,3 +1,5 @@
+import re
+
 """Тесты системных промптов."""
 from app.llm.prompts_gigachat import (
     CONTEXT_PROMPT_TEMPLATE,
@@ -22,8 +24,9 @@ def test_system_prompt_mentions_all_tools():
 
 
 def test_system_prompt_mentions_pii_placeholder():
-    """PII-плейсхолдер [NAME] должен быть упомянут — иначе LLM может не понять."""
-    assert "[NAME]" in SYSTEM_PROMPT
+    """PII-плейсхолдер NAME_с цифрой должен быть упомянут — иначе LLM может не понять."""
+    # Проверяем, что есть NAME_ с цифрой (NAME_1, NAME_2, NAME_3, ...)
+    assert re.search(r"NAME_\d+", SYSTEM_PROMPT), "В системном промпте должен быть плейсхолдер NAME_с цифрой"
 
 
 def test_system_prompt_forbids_markdown():
