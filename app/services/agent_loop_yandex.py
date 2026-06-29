@@ -6,11 +6,12 @@
 сам текст ответа не пишет. Ответ формирует Pass 2 (deepseek).
 
 Схема:
-  Pass 1 (yandexgpt-5-lite): выбор tool из 8 вариантов.
+  Pass 1 (yandexgpt-5-lite): выбор tool из 9 вариантов.
     - search_contacts / search_ats_* / search_shop / search_drugstore /
       suggest_hr_form  → bot_command: вернуть боту, обработка завершена.
     - search_internal  → векторный поиск в Qdrant → Pass 2 (deepseek с чанками).
     - answer_general   → Pass 2 (deepseek БЕЗ Qdrant, ответ из общих знаний).
+    - generate_image - генерация изображения.
 
   Если Pass 1 вернул текст вместо tool-call — это сбой классификации lite
   (сигнал, что пора поднять модель Pass 1). Отдаём вежливую заглушку.
@@ -248,7 +249,8 @@ async def process_request_yandex(
             prompt=image_prompt, correlation_id=correlation_id
         )
         # Аналитику пишем (вопрос + tool), сам ответ — картинка, текст пустой.
-        asyncio.create_task(save_analytics(
+        # Pass 2 для картинки — генерация в Alice AI ART (токенов у неё нет).
+        await asyncio.create_task(save_analytics(
             nocodb_client=agent.nocodb_client,
             user_id=user_id,
             masked_question=masked_query,
@@ -256,6 +258,7 @@ async def process_request_yandex(
             tool_used="generate_image",
             llm_pass1=pass1_llm_str,
             tokens_pass1=pass1_tokens,
+            llm_pass2="Alice AI ART",
             correlation_id=correlation_id,
         ))
         return ImageResponse(

@@ -11,6 +11,11 @@ services:
       - agent-net
     ports:
       - "6333:6333"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     image: redis:7-alpine
@@ -23,6 +28,11 @@ services:
       - agent-net
     ports:
       - "6379:6379"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   agent:
     build:
@@ -51,6 +61,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   indexer:
     build:
@@ -71,6 +86,39 @@ services:
     profiles:
       - tools
     entrypoint: ["python", "scripts/run_indexers.py"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  scheduler:
+    build:
+      context: ..
+      dockerfile: devops/Dockerfile
+    container_name: hr-ai-scheduler
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: redis
+      QDRANT_HOST: qdrant
+      LOG_FILE: logs/scheduler.log
+      PYTHONPATH: /app
+    volumes:
+      - ../logs:/app/logs
+      - hf_cache:/home/appuser/.cache/huggingface
+    depends_on:
+      - qdrant
+      - redis
+    networks:
+      - agent-net
+    entrypoint: ["python", "scripts/scheduler.py"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   qdrant_data:
